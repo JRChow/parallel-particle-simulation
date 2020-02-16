@@ -35,19 +35,12 @@ void apply_force(particle_t &particle, particle_t &neighbor) {
     particle.ay += coef * dy;
 }
 
-// Add the particle to its new bin (if necessary).
-inline void add_particle_to_right_bin(particle_t &pt) {
-    int row = floor(pt.x / BIN_SIZE);
-    int col = floor(pt.y / BIN_SIZE);
-    Bins[row * BinCnt + col].insert(&pt);
-}
-
 // Integrate the ODE
 void move(particle_t &p, double size) {
-    // Erase particle from old bin
+    // Old bin of the particle before moving
     int oldRow = floor(p.x / BIN_SIZE);
     int oldCol = floor(p.y / BIN_SIZE);
-    Bins[oldRow * BinCnt + oldCol].erase(&p);
+    int oldIdx = oldRow * BinCnt + oldCol;
 
     // Slightly simplified Velocity Verlet integration
     // Conserves energy better than explicit Euler method
@@ -67,8 +60,14 @@ void move(particle_t &p, double size) {
         p.vy = -p.vy;
     }
 
-    // Add particle to new bin
-    add_particle_to_right_bin(p);
+    // Move the particle to a new bin if necessary
+    int newRow = floor(p.x / BIN_SIZE);
+    int newCol = floor(p.y / BIN_SIZE);
+    int newIdx = newRow * BinCnt + newCol;
+    if (newIdx != oldIdx) {
+        Bins[oldIdx].erase(&p);
+        Bins[newIdx].insert(&p);
+    }
 }
 
 // You can use this space to initialize static, global data objects
@@ -81,7 +80,9 @@ void init_simulation(particle_t *parts, int num_parts, double size) {
 
     // Fill in particles into corresponding bins
     for (int i = 0; i < num_parts; i++) {
-        add_particle_to_right_bin(parts[i]);
+        int row = floor(parts[i].x / BIN_SIZE);
+        int col = floor(parts[i].y / BIN_SIZE);
+        Bins[row * BinCnt + col].insert(&parts[i]);
     }
 }
 
