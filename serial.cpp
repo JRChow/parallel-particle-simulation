@@ -3,24 +3,27 @@
 #include <iostream>
 #include <algorithm>
 #include <unordered_set>
+#include <cmath>
 
 using namespace std;
 
-#define BIN_CNT 50  // TODO: tune
+// Length of a bin's side
+#define BIN_SIZE 0.02
 
-// Global 2D array of sets containing particles
-unordered_set<particle_t *> binMat[BIN_CNT][BIN_CNT];
-double binSize;  // Size of one bin
+// Number of bins per side
+int binCnt;
+// Matrix of sets containing particles
+unordered_set<particle_t *> *bins;
 // 8 neighbors and self
-int dirs[9][2] = {{-1, -1},
-                  {-1, 0},
-                  {-1, 1},
-                  {0,  -1},
-                  {0,  0},
-                  {0,  1},
-                  {1,  -1},
-                  {1,  0},
-                  {1,  1}};
+const int dirs[9][2] = {{-1, -1},
+                        {-1, 0},
+                        {-1, 1},
+                        {0,  -1},
+                        {0,  0},
+                        {0,  1},
+                        {1,  -1},
+                        {1,  0},
+                        {1,  1}};
 
 // Apply the force from neighbor to particle
 void apply_force(particle_t &particle, particle_t &neighbor) {
@@ -43,19 +46,18 @@ void apply_force(particle_t &particle, particle_t &neighbor) {
 }
 
 // Add the particle to its new bin (if necessary).
-void add_particle_to_right_bin(particle_t& pt) {
-    int row = int(pt.x / binSize);
-    int col = int(pt.y / binSize);
-    binMat[row][col].insert(&pt);
+void add_particle_to_right_bin(particle_t &pt) {
+    int row = floor(pt.x / BIN_SIZE);
+    int col = floor(pt.y / BIN_SIZE);
+    bins[row * binCnt + col].insert(&pt);
 }
 
 // Integrate the ODE
-// TODO: update points' bins
 void move(particle_t &p, double size) {
     // Erase particle from old bin
-    int oldRow = int(p.x / binSize);
-    int oldCol = int(p.y / binSize);
-    binMat[oldRow][oldCol].erase(&p);
+    int oldRow = floor(p.x / BIN_SIZE);
+    int oldCol = floor(p.y / BIN_SIZE);
+    bins[oldRow * binCnt + oldCol].erase(&p);
 
     // Slightly simplified Velocity Verlet integration
     // Conserves energy better than explicit Euler method
@@ -83,8 +85,9 @@ void move(particle_t &p, double size) {
 // that you may need. This function will be called once before the
 // algorithm begins. Do not do any particle simulation here
 void init_simulation(particle_t *parts, int num_parts, double size) {
-    // Initialize bin size
-    binSize = double(size / BIN_CNT);
+    // Calculate number of bins and initialize bins
+    binCnt = ceil(size / BIN_SIZE);
+    bins = new unordered_set<particle_t *>[binCnt * binCnt];
 
     // Fill in particles into corresponding bins
     for (int i = 0; i < num_parts; i++) {
@@ -94,18 +97,18 @@ void init_simulation(particle_t *parts, int num_parts, double size) {
 
 // Helper function to calculate 9-by-9 bins
 void calculate_bin_forces(int row, int col) {
-    unordered_set < particle_t * > pts = binMat[row][col];
+    unordered_set < particle_t * > pts = bins[row * binCnt + col];
     // For each particle in the input bin
-    for (auto& pt : pts) {
+    for (auto &pt : pts) {
         pt->ax = pt->ay = 0;
         // Iterate over all valid neighboring bins
         for (auto const &dir : dirs) {
             int neiRow = row + dir[0];
             int neiCol = col + dir[1];
             if (min(neiRow, neiCol) >= 0 &&
-                max(neiRow, neiCol) < BIN_CNT) {
+                max(neiRow, neiCol) < binCnt) {
                 // Iterate over all particles in a neighbor
-                for (auto& neiPts : binMat[neiRow][neiCol]) {
+                for (auto &neiPts : bins[neiRow * binCnt + neiCol]) {
                     apply_force(*pt, *neiPts);
                 }
             }
@@ -115,8 +118,8 @@ void calculate_bin_forces(int row, int col) {
 
 void simulate_one_step(particle_t *parts, int num_parts, double size) {
     // Compute forces
-    for (int i = 0; i < BIN_CNT; i++) {
-        for (int j = 0; j < BIN_CNT; j++) {
+    for (int i = 0; i < binCnt; i++) {
+        for (int j = 0; j < binCnt; j++) {
             calculate_bin_forces(i, j);
         }
     }
