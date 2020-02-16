@@ -6,7 +6,7 @@
 
 using namespace std;
 
-#define BIN_CNT 1  // TODO: tune
+#define BIN_CNT 50  // TODO: tune
 
 // Global 2D array of sets containing particles
 unordered_set<particle_t *> binMat[BIN_CNT][BIN_CNT];
@@ -43,7 +43,7 @@ void apply_force(particle_t &particle, particle_t &neighbor) {
 }
 
 // Add the particle to its new bin (if necessary).
-void add_particle_to_right_bin(particle_t pt) {
+void add_particle_to_right_bin(particle_t& pt) {
     int row = int(pt.x / binSize);
     int col = int(pt.y / binSize);
     binMat[row][col].insert(&pt);
@@ -96,15 +96,16 @@ void init_simulation(particle_t *parts, int num_parts, double size) {
 void calculate_bin_forces(int row, int col) {
     unordered_set < particle_t * > pts = binMat[row][col];
     // For each particle in the input bin
-    for (auto pt : pts) {
+    for (auto& pt : pts) {
+        pt->ax = pt->ay = 0;
         // Iterate over all valid neighboring bins
-        for (auto dir : dirs) {
+        for (auto const &dir : dirs) {
             int neiRow = row + dir[0];
             int neiCol = col + dir[1];
             if (min(neiRow, neiCol) >= 0 &&
                 max(neiRow, neiCol) < BIN_CNT) {
                 // Iterate over all particles in a neighbor
-                for (auto neiPts : binMat[neiRow][neiCol]) {
+                for (auto& neiPts : binMat[neiRow][neiCol]) {
                     apply_force(*pt, *neiPts);
                 }
             }
