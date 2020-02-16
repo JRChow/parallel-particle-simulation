@@ -1,9 +1,29 @@
 #include "common.h"
 #include <cmath>
-#include <vector>
+#include <iostream>
+#include <algorithm>
+#include <unordered_set>
+
+using namespace std;
+
+#define BIN_CNT 1  // TODO: tune
+
+// Global 2D array of sets containing particles
+unordered_set<particle_t *> binMat[BIN_CNT][BIN_CNT];
+double binSize;  // Size of one bin
+// 8 neighbors and self
+int dirs[9][2] = {{-1, -1},
+                  {-1, 0},
+                  {-1, 1},
+                  {0,  -1},
+                  {0,  0},
+                  {0,  1},
+                  {1,  -1},
+                  {1,  0},
+                  {1,  1}};
 
 // Apply the force from neighbor to particle
-void apply_force(particle_t& particle, particle_t& neighbor) {
+void apply_force(particle_t &particle, particle_t &neighbor) {
     // Calculate Distance
     double dx = neighbor.x - particle.x;
     double dy = neighbor.y - particle.y;
@@ -22,14 +42,27 @@ void apply_force(particle_t& particle, particle_t& neighbor) {
     particle.ay += coef * dy;
 }
 
+// Add the particle to its new bin (if necessary).
+void add_particle_to_right_bin(particle_t pt) {
+    int row = int(pt.x / binSize);
+    int col = int(pt.y / binSize);
+    binMat[row][col].insert(&pt);
+}
+
 // Integrate the ODE
-void move(particle_t& p, double size) {
+// TODO: update points' bins
+void move(particle_t &p, double size) {
+    // Erase particle from old bin
+    int oldRow = int(p.x / binSize);
+    int oldCol = int(p.y / binSize);
+    binMat[oldRow][oldCol].erase(&p);
+
     // Slightly simplified Velocity Verlet integration
     // Conserves energy better than explicit Euler method
-    p.vx += p.ax * dtt;
-    p.vy += p.ay * dtt;
-    p.x += p.vx * dtt;
-    p.y += p.vy * dtt;
+    p.vx += p.ax * dt;
+    p.vy += p.ay * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
 
     // Bounce from walls
     while (p.x < 0 || p.x > size) {
@@ -41,65 +74,49 @@ void move(particle_t& p, double size) {
         p.y = p.y < 0 ? -p.y : 2 * size - p.y;
         p.vy = -p.vy;
     }
+
+    // Add particle to new bin
+    add_particle_to_right_bin(p);
 }
 
+// You can use this space to initialize static, global data objects
+// that you may need. This function will be called once before the
+// algorithm begins. Do not do any particle simulation here
+void init_simulation(particle_t *parts, int num_parts, double size) {
+    // Initialize bin size
+    binSize = double(size / BIN_CNT);
 
-void init_simulation(particle_t* parts, int num_parts, double size) {
-	// You can use this space to initialize static, global data objects
-    // that you may need. This function will be called once before the
-    // algorithm begins. Do not do any particle simulation here
-}
-
-void simulate_one_step(particle_t* parts, int num_parts, double size) {
-
-    //Build Bins
-    int bincnt = 200;
-    double binsize = double(size / bincnt);
-    std::vector<particle_t> bins[bincnt][bincnt];
-
-    for (int i = 0; i < num_parts; ++i) {
-        int j = int(parts[i].x / binsize);
-        int k = int(parts[i].y / binsize);
-        bins[j][k].push_back(parts[i]);
+    // Fill in particles into corresponding bins
+    for (int i = 0; i < num_parts; i++) {
+        add_particle_to_right_bin(parts[i]);
     }
+}
 
-    // Add neighbor bins loops:
-    for (int a = 0; a < bincnt; ++a) {
-        for (int b = 0; b < bincnt; ++b) {
-            for (int i = 0; i < bins[a][b].size(); ++i) {
-                bins[a][b][i].ax = bins[a][b][i].ay = 0;
-                int dirs[9][2] = {{-1, -1},
-                                  {-1, 0},
-                                  {-1, 1},
-                                  {0,  -1},
-                                  {0,  0},
-                                  {0,  1},
-                                  {1,  -1},
-                                  {1,  0},
-                                  {1,  1}};
-                for (int d = 0; d < 9; d++) {
-                    int row = a + dirs[d][0];
-                    int col = b + dirs[d][1];
-                    if (row >= 0 && row < bincnt && col >= 0 && col < bincnt) {
-                        for (int j = 0; j < bins[row][col].size(); ++j) {
-                            apply_force(bins[a][b][i], bins[a][b][j]);
-                        }
-                    }
+// Helper function to calculate 9-by-9 bins
+void calculate_bin_forces(int row, int col) {
+    unordered_set < particle_t * > pts = binMat[row][col];
+    // For each particle in the input bin
+    for (auto pt : pts) {
+        // Iterate over all valid neighboring bins
+        for (auto dir : dirs) {
+            int neiRow = row + dir[0];
+            int neiCol = col + dir[1];
+            if (min(neiRow, neiCol) >= 0 &&
+                max(neiRow, neiCol) < BIN_CNT) {
+                // Iterate over all particles in a neighbor
+                for (auto neiPts : binMat[neiRow][neiCol]) {
+                    apply_force(*pt, *neiPts);
                 }
             }
         }
     }
-    // Move Particles
-    for (int i = 0; i < num_parts; ++i) {
-        move(parts[i], size);
-    }
-    /**
+}
 
-    // Compute Forces
-    for (int i = 0; i < num_parts; ++i) {
-        parts[i].ax = parts[i].ay = 0;
-        for (int j = 0; j < num_parts; ++j) {
-            apply_force(parts[i], parts[j]);
+void simulate_one_step(particle_t *parts, int num_parts, double size) {
+    // Compute forces
+    for (int i = 0; i < BIN_CNT; i++) {
+        for (int j = 0; j < BIN_CNT; j++) {
+            calculate_bin_forces(i, j);
         }
     }
 
@@ -107,6 +124,5 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
     for (int i = 0; i < num_parts; ++i) {
         move(parts[i], size);
     }
-     **/
 }
 
