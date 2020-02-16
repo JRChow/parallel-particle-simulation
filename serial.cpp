@@ -46,7 +46,7 @@ void apply_force(particle_t &particle, particle_t &neighbor) {
 }
 
 // Add the particle to its new bin (if necessary).
-void add_particle_to_right_bin(particle_t &pt) {
+inline void add_particle_to_right_bin(particle_t &pt) {
     int row = floor(pt.x / BIN_SIZE);
     int col = floor(pt.y / BIN_SIZE);
     bins[row * binCnt + col].insert(&pt);
@@ -97,16 +97,15 @@ void init_simulation(particle_t *parts, int num_parts, double size) {
 
 // Helper function to calculate 9-by-9 bins
 void calculate_bin_forces(int row, int col) {
-    unordered_set < particle_t * > pts = bins[row * binCnt + col];
     // For each particle in the input bin
-    for (auto &pt : pts) {
+    for (auto &pt : bins[row * binCnt + col]) {
         pt->ax = pt->ay = 0;
         // Iterate over all valid neighboring bins
         for (auto const &dir : dirs) {
             int neiRow = row + dir[0];
             int neiCol = col + dir[1];
-            if (min(neiRow, neiCol) >= 0 &&
-                max(neiRow, neiCol) < binCnt) {
+            if (neiRow >= 0 && neiCol >= 0 &&
+                neiRow < binCnt && neiCol < binCnt) {
                 // Iterate over all particles in a neighbor
                 for (auto &neiPts : bins[neiRow * binCnt + neiCol]) {
                     apply_force(*pt, *neiPts);
