@@ -7,23 +7,13 @@
 
 using namespace std;
 
-// Length of a bin's side
-#define BIN_SIZE 0.02
+// Length of a bin's side (at least 0.02)
+#define BIN_SIZE 0.021
 
 // Number of bins per side
-int binCnt;
+int BinCnt;
 // Matrix of sets containing particles
-unordered_set<particle_t *> *bins;
-// 8 neighbors and self
-const int dirs[9][2] = {{-1, -1},
-                        {-1, 0},
-                        {-1, 1},
-                        {0,  -1},
-                        {0,  0},
-                        {0,  1},
-                        {1,  -1},
-                        {1,  0},
-                        {1,  1}};
+unordered_set<particle_t *> *Bins;
 
 // Apply the force from neighbor to particle
 void apply_force(particle_t &particle, particle_t &neighbor) {
@@ -49,7 +39,7 @@ void apply_force(particle_t &particle, particle_t &neighbor) {
 inline void add_particle_to_right_bin(particle_t &pt) {
     int row = floor(pt.x / BIN_SIZE);
     int col = floor(pt.y / BIN_SIZE);
-    bins[row * binCnt + col].insert(&pt);
+    Bins[row * BinCnt + col].insert(&pt);
 }
 
 // Integrate the ODE
@@ -57,7 +47,7 @@ void move(particle_t &p, double size) {
     // Erase particle from old bin
     int oldRow = floor(p.x / BIN_SIZE);
     int oldCol = floor(p.y / BIN_SIZE);
-    bins[oldRow * binCnt + oldCol].erase(&p);
+    Bins[oldRow * BinCnt + oldCol].erase(&p);
 
     // Slightly simplified Velocity Verlet integration
     // Conserves energy better than explicit Euler method
@@ -86,8 +76,8 @@ void move(particle_t &p, double size) {
 // algorithm begins. Do not do any particle simulation here
 void init_simulation(particle_t *parts, int num_parts, double size) {
     // Calculate number of bins and initialize bins
-    binCnt = ceil(size / BIN_SIZE);
-    bins = new unordered_set<particle_t *>[binCnt * binCnt];
+    BinCnt = ceil(size / BIN_SIZE);
+    Bins = new unordered_set<particle_t *>[BinCnt * BinCnt];
 
     // Fill in particles into corresponding bins
     for (int i = 0; i < num_parts; i++) {
@@ -95,30 +85,39 @@ void init_simulation(particle_t *parts, int num_parts, double size) {
     }
 }
 
+inline void interact_with_neighbor(particle_t *pt, int neiRow, int neiCol) {
+    // Check if the neighbor is valid (within bound)
+    if (neiRow < 0 || neiRow >= BinCnt ||
+        neiCol < 0 || neiCol >= BinCnt)
+        return;
+    // Interact with all particles in a valid neighbor
+    for (auto &neiPts : Bins[neiRow * BinCnt + neiCol]) {
+        apply_force(*pt, *neiPts);
+    }
+}
+
 // Helper function to calculate 9-by-9 bins
 void calculate_bin_forces(int row, int col) {
     // For each particle in the input bin
-    for (auto &pt : bins[row * binCnt + col]) {
+    for (auto &pt : Bins[row * BinCnt + col]) {
         pt->ax = pt->ay = 0;
         // Iterate over all valid neighboring bins
-        for (auto const &dir : dirs) {
-            int neiRow = row + dir[0];
-            int neiCol = col + dir[1];
-            if (neiRow >= 0 && neiCol >= 0 &&
-                neiRow < binCnt && neiCol < binCnt) {
-                // Iterate over all particles in a neighbor
-                for (auto &neiPts : bins[neiRow * binCnt + neiCol]) {
-                    apply_force(*pt, *neiPts);
-                }
-            }
-        }
+        interact_with_neighbor(pt, row, col);  // Self
+        interact_with_neighbor(pt, row - 1, col);  // Top
+        interact_with_neighbor(pt, row + 1, col);  // Bottom
+        interact_with_neighbor(pt, row, col - 1);  // Left
+        interact_with_neighbor(pt, row, col + 1);  // Right
+        interact_with_neighbor(pt, row - 1, col - 1);  // Top left
+        interact_with_neighbor(pt, row - 1, col + 1);  // Top right
+        interact_with_neighbor(pt, row + 1, col - 1);  // Bottom left
+        interact_with_neighbor(pt, row + 1, col - 1);  // Bottom right
     }
 }
 
 void simulate_one_step(particle_t *parts, int num_parts, double size) {
-    // Compute forces
-    for (int i = 0; i < binCnt; i++) {
-        for (int j = 0; j < binCnt; j++) {
+    // Compute forces in each bin
+    for (int i = 0; i < BinCnt; i++) {
+        for (int j = 0; j < BinCnt; j++) {
             calculate_bin_forces(i, j);
         }
     }
