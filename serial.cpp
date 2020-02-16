@@ -98,7 +98,7 @@ inline void interact_with_neighbor(particle_t *pt, int neiRow, int neiCol) {
 }
 
 // Helper function to calculate 9-by-9 bins
-void calculate_bin_forces(int row, int col) {
+inline void calculate_bin_forces(int row, int col) {
     // For each particle in the input bin
     for (auto &pt : Bins[row * BinCnt + col]) {
         pt->ax = pt->ay = 0;
@@ -111,7 +111,7 @@ void calculate_bin_forces(int row, int col) {
         interact_with_neighbor(pt, row - 1, col - 1);  // Top left
         interact_with_neighbor(pt, row - 1, col + 1);  // Top right
         interact_with_neighbor(pt, row + 1, col - 1);  // Bottom left
-        interact_with_neighbor(pt, row + 1, col - 1);  // Bottom right
+        interact_with_neighbor(pt, row + 1, col + 1);  // Bottom right
     }
 }
 
