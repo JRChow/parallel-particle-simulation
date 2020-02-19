@@ -9,6 +9,7 @@ using namespace std;
 #define BIN_SIZE 0.01
 int BinCnt;
 unordered_set<particle_t *> *Bins;
+static omp_lock_t lock;
 // 8 neighbors and self
 int dirs[9][2] = {{-1, -1},
                   {-1, 0},
@@ -69,42 +70,41 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     // algorithm begins. Do not do any particle simulation here
     BinCnt = ceil(size/BIN_SIZE);
     Bins = new unordered_set<particle_t *>[BinCnt*BinCnt];
+    omp_init_lock(&lock);
 }
 
 void simulate_one_step(particle_t* parts, int num_parts, double size) {
 	
     //Put particles into Bins
+    // #pragma omp parallel for num_threads(10)
     #pragma omp for
     for (int i = 0; i<num_parts; ++i){
-    	#pragma omp critical
-    	{
 	        int rowidx = int(parts[i].x/BIN_SIZE);
 	        int colidx = int(parts[i].y/BIN_SIZE);
 	        parts[i].ax=parts[i].ay=0;
+	        omp_set_lock(&lock);
 	        Bins[rowidx*BinCnt+colidx].insert(&parts[i]);
-  		}
+	        omp_unset_lock(&lock);
     }
 	
 
-	#pragma omp for	
+    #pragma omp parallel for collapse(2)
     for (int a = 0; a<BinCnt; ++a){
         for (int b = 0; b<BinCnt; ++b){
-            for (auto& pt: Bins[a*BinCnt+b]){
+            for (auto pt = Bins[a*BinCnt+b].begin(); pt!=Bins[a*BinCnt+b].end();++pt){
                 for (auto const &dir : dirs){
                     int row = a+dir[0];
                     int col = b+dir[1];
                     if (row<0 || col<0 || row>= BinCnt || col>=BinCnt)
                         continue; 
-                    for (auto& neipts : Bins[row*BinCnt+col]) {
-                        apply_force(*pt, *neipts);
+                    for (auto neipts = Bins[row*BinCnt+col].begin(); neipts!=Bins[row*BinCnt+col].end();++neipts) {
+                        apply_force(**pt, **neipts);
                     }
                 }
             }
         }
     }
 	
-
-
     // for (int i=0; i<num_parts; ++i){
     //     parts[i].ax = parts[i].ay=0;
     //     for (int j=0; j<num_parts; ++j){
@@ -113,21 +113,20 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
     // }
 
     // Move Particles
+    // #pragma omp parallel for num_threads(10)
     #pragma omp for
     for (int i = 0; i < num_parts; ++i) {
         move(parts[i], size);
     }
 	
-
     // Clear Particles in Bins
-    #pragma omp for
+    // #pragma omp parallel for num_threads(10)
+	#pragma omp for
     for (int a = 0; a<BinCnt; ++a){
         for (int b = 0; b<BinCnt; ++b){
-        	#pragma omp critical
-        	{
-            	Bins[a*BinCnt+b].clear();
-            }
+	        omp_set_lock(&lock);
+            Bins[a*BinCnt+b].clear();
+            omp_unset_lock(&lock);
         }
     }
-	
 }

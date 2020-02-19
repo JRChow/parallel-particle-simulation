@@ -5,8 +5,9 @@
 #include <unordered_set>
 using namespace std;
 
-#define BIN_SIZE 0.01
+#define BIN_SIZE 0.02
 int BinCnt;
+// unordered_set<int> *Bins;
 unordered_set<particle_t *> *Bins;
 // 8 neighbors and self
 int dirs[9][2] = {{-1, -1},
@@ -68,6 +69,8 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     // algorithm begins. Do not do any particle simulation here
     BinCnt = ceil(size/BIN_SIZE);
     Bins = new unordered_set<particle_t *>[BinCnt*BinCnt];
+    // Bins = new unordered_set<int>[BinCnt*BinCnt];
+
 }
 
 void simulate_one_step(particle_t* parts, int num_parts, double size) {
@@ -77,32 +80,27 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
         int rowidx = int(parts[i].x/BIN_SIZE);
         int colidx = int(parts[i].y/BIN_SIZE);
         parts[i].ax=parts[i].ay=0;
+        // Bins[rowidx*BinCnt+colidx].insert(i);
         Bins[rowidx*BinCnt+colidx].insert(&parts[i]);
     }
 
     for (int a = 0; a<BinCnt; ++a){
         for (int b = 0; b<BinCnt; ++b){
-            for (auto& pt: Bins[a*BinCnt+b]){
+            // for (unordered_set<int>::iterator pt = Bins[a*BinCnt+b].begin(); pt!=Bins[a*BinCnt+b].end(); ++pt){
+            for (auto &pt : Bins[a*BinCnt+b]){
                 for (auto const &dir : dirs){
                     int row = a+dir[0];
                     int col = b+dir[1];
                     if (row<0 || col<0 || row>= BinCnt || col>=BinCnt)
                         continue; 
-                    for (auto& neipts : Bins[row*BinCnt+col]) {
+                    // for (unordered_set<int>::iterator neipts = Bins[row*BinCnt+col].begin(); neipts!=Bins[row*BinCnt+col].end();++neipts) {
+                    for (auto &neipts : Bins[row*BinCnt+col]){    
                         apply_force(*pt, *neipts);
                     }
                 }
             }
         }
     }
-
-
-    // for (int i=0; i<num_parts; ++i){
-    //     parts[i].ax = parts[i].ay=0;
-    //     for (int j=0; j<num_parts; ++j){
-    //         apply_force(parts[i], parts[j]);
-    //     }
-    // }
 
     // Move Particles
     for (int i = 0; i < num_parts; ++i) {
