@@ -74,45 +74,20 @@ void simulate_one_step(particle_t *parts, int num_parts, double size) {
 // Helper function to calculate 9-by-9 bins
 inline void calculate_bin_forces(int row, int col) {
     auto &bin = Bins[row * BinCnt + col];
-//#pragma omp parallel  // Particle-level parallel
-//    {
-//#pragma omp single  // Particle-level single
-//        {
-            // For each particle in the input bin
-            for (auto &pt : Bins[row * BinCnt + col]) {
-//#pragma omp task  // Particle-level task
-//                {
-                    pt->ax = pt->ay = 0;
-                    // Interact with all valid neighboring bins
-//#pragma omp parallel  // Bin-level parallel
-//                    {
-//#pragma omp single  // Bin-level single
-//                        {
-//#pragma omp task
-                            { interact_with_neighbor(pt, row, col); }   // Self
-//#pragma omp task
-                            { interact_with_neighbor(pt, row - 1, col); }  // Top
-//#pragma omp task
-                            { interact_with_neighbor(pt, row + 1, col); }  // Bottom
-//#pragma omp task
-                            { interact_with_neighbor(pt, row, col - 1); }  // Left
-//#pragma omp task
-                            { interact_with_neighbor(pt, row, col + 1); }  // Right
-//#pragma omp task
-                            { interact_with_neighbor(pt, row - 1, col - 1); }  // Top left
-//#pragma omp task
-                            { interact_with_neighbor(pt, row - 1, col + 1); }  // Top right
-//#pragma omp task
-                            { interact_with_neighbor(pt, row + 1, col - 1); }  // Bottom left
-//#pragma omp task
-                            { interact_with_neighbor(pt, row + 1, col + 1); }  // Bottom right
-//                        }    // End of bin-level single
-//                    }  // End of bin-level parallel
-//                }  // End of particle-level task
-            }
-//        }  // End of particle-level single
-//    }    // End of particle-level parallel
-
+    // For each particle in the input bin
+    for (auto &pt : Bins[row * BinCnt + col]) {
+        pt->ax = pt->ay = 0;
+        // Interact with all valid neighboring bins
+        interact_with_neighbor(pt, row, col);          // Self
+        interact_with_neighbor(pt, row - 1, col);      // Top
+        interact_with_neighbor(pt, row + 1, col);      // Bottom
+        interact_with_neighbor(pt, row, col - 1);      // Left
+        interact_with_neighbor(pt, row, col + 1);      // Right
+        interact_with_neighbor(pt, row - 1, col - 1);  // Top left
+        interact_with_neighbor(pt, row - 1, col + 1);  // Top right
+        interact_with_neighbor(pt, row + 1, col - 1);  // Bottom left
+        interact_with_neighbor(pt, row + 1, col + 1);  // Bottom right
+    }
 }
 
 // For a particle, make it interact with all particles in a neighboring bin.
