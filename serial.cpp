@@ -7,8 +7,8 @@
 
 using namespace std;
 
-// Length of a bin's side
-#define BIN_SIZE 0.021
+// Length of a bin's side (0.02 is also a good choice)
+#define BIN_SIZE 0.01
 
 // Number of bins per side
 int BinCnt;
@@ -80,9 +80,10 @@ void init_simulation(particle_t *parts, int num_parts, double size) {
 
     // Fill in particles into corresponding bins
     for (int i = 0; i < num_parts; i++) {
-        int row = floor(parts[i].x / BIN_SIZE);
-        int col = floor(parts[i].y / BIN_SIZE);
-        Bins[row * BinCnt + col].insert(&parts[i]);
+        particle_t& pt = parts[i];
+        int row = floor(pt.x / BIN_SIZE);
+        int col = floor(pt.y / BIN_SIZE);
+        Bins[row * BinCnt + col].insert(&pt);
     }
 }
 
