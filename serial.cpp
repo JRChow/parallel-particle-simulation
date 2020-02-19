@@ -7,7 +7,7 @@
 
 using namespace std;
 
-// Length of a bin's side (at least 0.02)
+// Length of a bin's side
 #define BIN_SIZE 0.021
 
 // Number of bins per side
