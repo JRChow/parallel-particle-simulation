@@ -11,7 +11,7 @@ using namespace std;
 ////////////////////////////////////////// Global Variables //////////////////////////////////////////
 
 // Length of a bin's side
-#define BIN_SIZE 0.021
+#define BIN_SIZE 0.02  // 0.02 is better than 0.01
 
 // Number of bins per side
 int BinCnt;
@@ -43,7 +43,7 @@ void init_simulation(particle_t *parts, int num_parts, double size) {
     Bins = new unordered_set<particle_t *>[BinCnt * BinCnt];
 
     // Fill in particles into corresponding bins
-#pragma omp parallel for
+#pragma omp parallel for  // Parallelize because initialization is also timed
     for (int i = 0; i < num_parts; i++) {
         particle_t &pt = parts[i];
         int row = floor(pt.x / BIN_SIZE);
@@ -55,7 +55,7 @@ void init_simulation(particle_t *parts, int num_parts, double size) {
 // Note: Outside this function is a "#pragma omp parallel"
 void simulate_one_step(particle_t *parts, int num_parts, double size) {
     // Compute forces in each bin
-#pragma omp for collapse(2)  // Bin-level parallelism
+#pragma omp for collapse(2)  // Bin-level parallelism (likely necessary because it's the top-level)
     for (int i = 0; i < BinCnt; i++) {
         for (int j = 0; j < BinCnt; j++) {
             calculate_bin_forces(i, j);  // Each iteration is independent of previous ones
@@ -74,29 +74,45 @@ void simulate_one_step(particle_t *parts, int num_parts, double size) {
 // Helper function to calculate 9-by-9 bins
 inline void calculate_bin_forces(int row, int col) {
     auto &bin = Bins[row * BinCnt + col];
-//#pragma omp parallel  // Using this three-level nested construct because...
+//#pragma omp parallel  // Particle-level parallel
 //    {
-//#pragma omp single  // ...unordered_set has no random access iterator
+//#pragma omp single  // Particle-level single
 //        {
             // For each particle in the input bin
             for (auto &pt : Bins[row * BinCnt + col]) {
-//#pragma omp task
+//#pragma omp task  // Particle-level task
 //                {
                     pt->ax = pt->ay = 0;
-                    // Iterate over all valid neighboring bins
-                    interact_with_neighbor(pt, row, col);  // Self
-                    interact_with_neighbor(pt, row - 1, col);  // Top
-                    interact_with_neighbor(pt, row + 1, col);  // Bottom
-                    interact_with_neighbor(pt, row, col - 1);  // Left
-                    interact_with_neighbor(pt, row, col + 1);  // Right
-                    interact_with_neighbor(pt, row - 1, col - 1);  // Top left
-                    interact_with_neighbor(pt, row - 1, col + 1);  // Top right
-                    interact_with_neighbor(pt, row + 1, col - 1);  // Bottom left
-                    interact_with_neighbor(pt, row + 1, col + 1);  // Bottom right
-//                }
+                    // Interact with all valid neighboring bins
+//#pragma omp parallel  // Bin-level parallel
+//                    {
+//#pragma omp single  // Bin-level single
+//                        {
+//#pragma omp task
+                            { interact_with_neighbor(pt, row, col); }   // Self
+//#pragma omp task
+                            { interact_with_neighbor(pt, row - 1, col); }  // Top
+//#pragma omp task
+                            { interact_with_neighbor(pt, row + 1, col); }  // Bottom
+//#pragma omp task
+                            { interact_with_neighbor(pt, row, col - 1); }  // Left
+//#pragma omp task
+                            { interact_with_neighbor(pt, row, col + 1); }  // Right
+//#pragma omp task
+                            { interact_with_neighbor(pt, row - 1, col - 1); }  // Top left
+//#pragma omp task
+                            { interact_with_neighbor(pt, row - 1, col + 1); }  // Top right
+//#pragma omp task
+                            { interact_with_neighbor(pt, row + 1, col - 1); }  // Bottom left
+//#pragma omp task
+                            { interact_with_neighbor(pt, row + 1, col + 1); }  // Bottom right
+//                        }    // End of bin-level single
+//                    }  // End of bin-level parallel
+//                }  // End of particle-level task
             }
-//        }
-//    }
+//        }  // End of particle-level single
+//    }    // End of particle-level parallel
+
 }
 
 // For a particle, make it interact with all particles in a neighboring bin.
@@ -105,19 +121,11 @@ inline void interact_with_neighbor(particle_t *pt, int neiRow, int neiCol) {
     if (neiRow < 0 || neiRow >= BinCnt ||
         neiCol < 0 || neiCol >= BinCnt)
         return;
-//#pragma omp parallel  // Using this three-level nested construct because...
-//    {
-//#pragma omp single  // ...unordered_set has no random access iterator
-//        {
-            // Interact with all particles in a valid neighbor
-            for (auto &neiPts : Bins[neiRow * BinCnt + neiCol]) {  // Note: Adding omp here slowed things down
-//#pragma omp task
-//                {
-                    apply_force(*pt, *neiPts);
-//                }
-            }
-//        }
-//    }
+    // Interact with all particles in a valid neighbor
+    // Parallelization is probably not helpful here
+    for (auto &neiPts : Bins[neiRow * BinCnt + neiCol]) {
+        apply_force(*pt, *neiPts);
+    }
 }
 
 // Apply the force from neighbor to particle
