@@ -1,10 +1,13 @@
 #!/bin/bash
 #SBATCH -N 1
 #SBATCH -C knl
-#SBATCH -q debug
+#SBATCH -q regular
 #SBATCH -J cs267
 #SBATCH -t 00:30:00
 
 #run the application:
-srun -n 1 -c 1 --cpu_bind=cores ./serial
+srun -n 1 -c 1 --cpu_bind=cores ./serial -s 42 -n 1000
+srun -n 1 -c 1 --cpu_bind=cores ./serial -s 42 -n 10000
+srun -n 1 -c 1 --cpu_bind=cores ./serial -s 42 -n 100000
+srun -n 1 -c 1 --cpu_bind=cores ./serial -s 42 -n 1000000
 
