@@ -7,7 +7,11 @@
 
 #run the application:
 srun -n 1 -c 1 --cpu_bind=cores ./serial -s 42 -n 1000
-srun -n 1 -c 1 --cpu_bind=cores ./serial -s 42 -n 10000
-srun -n 1 -c 1 --cpu_bind=cores ./serial -s 42 -n 100000
-srun -n 1 -c 1 --cpu_bind=cores ./serial -s 42 -n 1000000
+srun -n 1 -c 1 --cpu_bind=cores ./serial -s 42 -n 2000
+srun -n 1 -c 1 --cpu_bind=cores ./serial -s 42 -n 4000
+srun -n 1 -c 1 --cpu_bind=cores ./serial -s 42 -n 8000
+srun -n 1 -c 1 --cpu_bind=cores ./serial -s 42 -n 16000
+srun -n 1 -c 1 --cpu_bind=cores ./serial -s 42 -n 32000
+srun -n 1 -c 1 --cpu_bind=cores ./serial -s 42 -n 64000
+srun -n 1 -c 1 --cpu_bind=cores ./serial -s 42 -n 128000
 
