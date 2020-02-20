@@ -17,7 +17,7 @@ using namespace std;
 int BinCnt;
 // Matrix of sets containing particles
 unordered_set<particle_t *> *Bins;  // <- Need to protect it against race conditions
-// Each row has a lock
+// Each bin has a lock
 omp_lock_t *Locks;
 
 ////////////////////////////////////////// Function Declarations //////////////////////////////////////////
@@ -42,11 +42,12 @@ void move(particle_t &p, double size);
 void init_simulation(particle_t *parts, int num_parts, double size) {
     // Calculate number of bins and initialize bins
     BinCnt = ceil(size / BIN_SIZE);
-    Bins = new unordered_set<particle_t *>[BinCnt * BinCnt];
+    int N = BinCnt * BinCnt;  // Total number of bins
+    Bins = new unordered_set<particle_t *>[N];
 
     // Initialize locks
-    Locks = new omp_lock_t[BinCnt];
-    for (int i = 0; i < BinCnt; i++) {
+    Locks = new omp_lock_t[N];
+    for (int i = 0; i < N; i++) {
         omp_init_lock(&Locks[i]);
     }
 
@@ -56,17 +57,18 @@ void init_simulation(particle_t *parts, int num_parts, double size) {
         particle_t &pt = parts[i];
         int row = floor(pt.x / BIN_SIZE);
         int col = floor(pt.y / BIN_SIZE);
+        int idx = row * BinCnt + col;
 
-        omp_set_lock(&Locks[row]);
-        Bins[row * BinCnt + col].insert(&pt);
-        omp_unset_lock(&Locks[row]);
+        omp_set_lock(&Locks[idx]);
+        Bins[idx].insert(&pt);
+        omp_unset_lock(&Locks[idx]);
     }
 }
 
 // Note: Outside this function is a "#pragma omp parallel"
 void simulate_one_step(particle_t *parts, int num_parts, double size) {
     // Compute forces in each bin
-#pragma omp for  // Bin-level parallelism (likely necessary because it's the top-level)
+#pragma omp for collapse(2)  // Bin-level parallelism (likely necessary because it's the top-level)
     for (int i = 0; i < BinCnt; i++) {
         for (int j = 0; j < BinCnt; j++) {
             calculate_bin_forces(i, j);  // Each iteration is independent of previous ones
@@ -165,12 +167,13 @@ void move(particle_t &p, double size) {
     int newIdx = newRow * BinCnt + newCol;
     if (newIdx != oldIdx) {
 
-        omp_set_lock(&Locks[oldRow]);
+        omp_set_lock(&Locks[oldIdx]);
         Bins[oldIdx].erase(&p);
-        omp_unset_lock(&Locks[oldRow]);
+        omp_unset_lock(&Locks[oldIdx]);
 
-        omp_set_lock(&Locks[newRow]);
+        omp_set_lock(&Locks[newIdx]);
         Bins[newIdx].insert(&p);
-        omp_unset_lock(&Locks[newRow]);
+        omp_unset_lock(&Locks[newIdx]);
+
     }
 }
