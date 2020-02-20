@@ -11,7 +11,7 @@ using namespace std;
 ////////////////////////////////////////// Global Variables //////////////////////////////////////////
 
 // Length of a bin's side
-#define BIN_SIZE 0.02  // 0.02 is better than 0.01
+#define BIN_SIZE 0.01
 
 // Number of bins per side
 int BinCnt;
