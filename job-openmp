@@ -11,5 +11,12 @@ export OMP_PLACES=cores
 export OMP_PROC_BIND=spread
 
 #run the application:
-srun -n 1 -c 68 --cpu_bind=cores ./openmp
-
+echo "OpenMP Serial"
+srun -n 1 -c 68 --cpu_bind=cores ./openmp -s 42 -n 1000
+srun -n 1 -c 68 --cpu_bind=cores ./openmp -s 42 -n 2000
+srun -n 1 -c 68 --cpu_bind=cores ./openmp -s 42 -n 4000
+srun -n 1 -c 68 --cpu_bind=cores ./openmp -s 42 -n 8000
+srun -n 1 -c 68 --cpu_bind=cores ./openmp -s 42 -n 16000
+srun -n 1 -c 68 --cpu_bind=cores ./openmp -s 42 -n 32000
+srun -n 1 -c 68 --cpu_bind=cores ./openmp -s 42 -n 64000
+srun -n 1 -c 68 --cpu_bind=cores ./openmp -s 42 -n 128000
