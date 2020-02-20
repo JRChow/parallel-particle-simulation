@@ -1,0 +1,23 @@
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -C knl
+#SBATCH -q debug
+#SBATCH -J cs267
+#SBATCH -t 00:30:00
+
+# Increase problem size proportionally to number of procesors
+
+n_thread=( 17 34 68 136 272 )
+n_particle=( 25000 50000 100000 200000 400000 )
+
+echo ">>> OpenMP [Weak Scaling] <<<"
+for ((i=0;i<${#n_thread[@]};++i))
+do
+    #OpenMP settings:
+    export OMP_PLACES=cores
+    export OMP_PROC_BIND=spread
+    export OMP_NUM_THREADS=${n_thread[i]}
+    echo "num thread = ${n_thread[i]}"
+    srun -n 1 -c ${n_thread[i]} --cpu_bind=cores ./openmp -s 42 -n ${n_particle[i]}
+done
+

@@ -1,0 +1,21 @@
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -C knl
+#SBATCH -q debug
+#SBATCH -J cs267
+#SBATCH -t 00:30:00
+
+# Keep the problem size constant but increase number of processors
+
+echo ">>> OpenMP [Strong Scaling] <<<"
+for n_thread in 17 34 68 136 272  # Varying number of threads
+do
+    #OpenMP settings:
+    export OMP_PLACES=cores
+    export OMP_PROC_BIND=spread
+    export OMP_NUM_THREADS=$n_thread
+    echo "num thread = $n_thread"
+    # Fixed problem size: 1M particles
+    srun -n 1 -c $n_thread --cpu_bind=cores ./openmp -s 42 -n 1000000
+done
+
