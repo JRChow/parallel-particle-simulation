@@ -68,8 +68,11 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
 }
 
 void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, int num_proc) {
+    // Apply_Force()
     // TODO: implement
-//    cout << "simulate_one_step() at " << rank << "/" << num_proc << endl;
+
+    // Move()
+    // TODO: implement
 }
 
 /* Write this function such that at the end of it, the master (rank == 0)
