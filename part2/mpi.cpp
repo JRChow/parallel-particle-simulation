@@ -40,6 +40,48 @@ inline void put_particle_to_bin(particle_t& pt) {
     Bins[idx].push_back(&pt);
 }
 
+/* Assuming this processor is "5" on a number pad, get the rank of the neighbor corresponding
+ * to the input neighbor_num on the number pad. The number pad looks like:
+ * 1 2 3
+ * 4 + 6
+ * 7 8 9
+ * For example, neighbor_num 1 means this processor's top-left neighbor.
+ * */
+inline int get_neighbor_proc_rank(int my_rank, int neighbor_num) {
+    int neighbor_rank = -1;
+    switch (neighbor_num) {
+        case 1:  // Top-left neighbor
+            neighbor_rank = my_rank - Num_Proc_Per_Side - 1;
+            break;
+        case 2:  // Top neighbor
+            neighbor_rank = my_rank - Num_Proc_Per_Side;
+            break;
+        case 3:  // Top-right neighbor
+            break;
+        case 4:  // Left neighbor
+            neighbor_rank = my_rank - 1;
+            break;
+        case 6:  // Right neighbor
+            neighbor_rank = my_rank + 1;
+            break;
+        case 7:  // Bottom-left neighbor
+            neighbor_rank = my_rank + Num_Proc_Per_Side - 1;
+            break;
+        case 8:  // Bottom neighbor
+            neighbor_rank = my_rank + Num_Proc_Per_Side;
+            break;
+        case 9:  // Bottom-right neighbor
+            neighbor_rank = my_rank + Num_Proc_Per_Side + 1;
+            break;
+        default:
+            neighbor_rank = -1;
+    }
+    if (neighbor_rank < 0 ||
+        neighbor_rank >= Num_Proc_Per_Side * Num_Proc_Per_Side)
+        return -1;
+    return neighbor_rank;
+}
+
 ///////////////////////////////////////// Key Functions /////////////////////////////////////////
 
 // Initialize data objects that we need
@@ -69,8 +111,7 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
 
 void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, int num_proc) {
     // Apply_Force()
-
-    MPI_Isend(&Bins[0], );
+    MPI_Isend(&Bins[0][0], Bins[0].size(), PARTICLE, );
 
     // Move()
     // TODO: implement
