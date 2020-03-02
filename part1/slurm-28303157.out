@@ -1,0 +1,11 @@
+>>> OpenMP [Strong Scaling] <<<
+num thread = 17
+srun: fatal: Can not execute ./openmp
+num thread = 34
+srun: fatal: Can not execute ./openmp
+num thread = 68
+srun: fatal: Can not execute ./openmp
+num thread = 136
+srun: fatal: Can not execute ./openmp
+num thread = 272
+srun: fatal: Can not execute ./openmp
