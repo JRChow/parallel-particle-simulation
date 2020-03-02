@@ -2,7 +2,7 @@
 #include <mpi.h>
 #include <iostream>
 #include <cmath>
-#include <unordered_set>
+#include <vector>
 
 using namespace std;
 
@@ -20,7 +20,7 @@ int My_Col_Idx;  // Column index of this processor
 double My_Min_X;  // Minimum X value of this processor
 double My_Min_Y;  // Minimum Y value of this processor
 
-unordered_set<particle_t*> *Bins;  // The bins belonging to this processor
+vector<particle_t*> *Bins;  // The bins belonging to this processor
 
 //////////////////////////////////////// Helper Functions ////////////////////////////////////////
 
@@ -37,7 +37,7 @@ inline void put_particle_to_bin(particle_t& pt) {
     int row_idx = floor( (pt.x - My_Min_X) / BIN_SIZE );
     int col_idx = floor( (pt.y - My_Min_Y) / BIN_SIZE );
     int idx = row_idx * Num_Bins_Per_Proc_Side + col_idx;
-    Bins[idx].insert(&pt);
+    Bins[idx].push_back(&pt);
 }
 
 ///////////////////////////////////////// Key Functions /////////////////////////////////////////
@@ -56,7 +56,7 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
     My_Min_Y = My_Col_Idx * Proc_Size;
 
     // Initialize bins specific to this processor
-    Bins = new unordered_set<particle_t*>[Num_Bins_Per_Proc_Side * Num_Bins_Per_Proc_Side];
+    Bins = new vector<particle_t*>[Num_Bins_Per_Proc_Side * Num_Bins_Per_Proc_Side];
     // Assign particles belonging to this processor to their corresponding bins
     for (int i = 0; i < num_parts; i++) {
         particle_t& pt = parts[i];
@@ -69,7 +69,8 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
 
 void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, int num_proc) {
     // Apply_Force()
-    // TODO: implement
+
+    MPI_Isend(&Bins[0], );
 
     // Move()
     // TODO: implement
