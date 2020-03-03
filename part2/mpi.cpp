@@ -300,7 +300,6 @@ void move(particle_t &p, double size){
         if (newIdx != oldIdx){
             Bins[oldIdx].erase(&p);
             Bins[newIdx].insert(&p);
-        }
     }
 }
 
