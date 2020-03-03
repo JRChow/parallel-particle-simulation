@@ -28,8 +28,8 @@ unordered_set<particle_t *> *Bins;
 
 enum Direction {
     TOP, BOTTOM, LEFT, RIGHT,  // Horizontal and vertical
-    TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT
-};  // Corners
+    TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT  // Corners
+};
 
 // Buffers for receiving particles from 8 neighbors
 vector<particle_t *> Recv_Buffers[8];
@@ -97,16 +97,16 @@ inline int get_neighbor_proc_rank(Direction nei_dir) {
 }
 
 // Collect particles from certain bins and put them in a vector
-void collect_particles_from_bins(Direction direction, vector<particle_t *> &pt_vec) {
+void collect_particles_from_bins(Direction which_bins, vector<particle_t *> &pt_vec) {
     int N_padded = Num_Bins_Per_Proc_Side + 2;
-    if (direction == TOP || direction == BOTTOM) {
-        int row_idx = direction == TOP ? 1 : Num_Bins_Per_Proc_Side;
+    if (which_bins == TOP || which_bins == BOTTOM) {
+        int row_idx = which_bins == TOP ? 1 : Num_Bins_Per_Proc_Side;
         for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
             unordered_set<particle_t *> &bin = Bins[row_idx * N_padded + i];
             pt_vec.insert(pt_vec.end(), bin.begin(), bin.end());
         }
-    } else if (direction == LEFT || direction == RIGHT) {
-        int col_idx = direction == LEFT ? 1 : Num_Bins_Per_Proc_Side;
+    } else if (which_bins == LEFT || which_bins == RIGHT) {
+        int col_idx = which_bins == LEFT ? 1 : Num_Bins_Per_Proc_Side;
         for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
             unordered_set<particle_t *> &bin = Bins[i * N_padded + col_idx];
             pt_vec.insert(pt_vec.end(), bin.begin(), bin.end());
@@ -115,8 +115,8 @@ void collect_particles_from_bins(Direction direction, vector<particle_t *> &pt_v
 }
 
 // Put particles in the receiving buffer into correct bins
-void put_buffered_particles_into_bins(Direction dir) {
-    vector<particle_t *> &buffer = Recv_Buffers[dir];
+void put_buffered_particles_into_bins(Direction which_bins) {
+    vector<particle_t *> &buffer = Recv_Buffers[which_bins];
     for (auto &pt : buffer) {
         put_particle_to_bin(*pt);
     }
