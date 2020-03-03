@@ -26,11 +26,11 @@ double My_Min_Y;  // Minimum Y value of this processor
 // The bins containing all the relevant particles
 unordered_set<particle_t*> *Bins;
 
-enum Neighbor {TOP, BOTTOM, LEFT, RIGHT,  // Four directions
+enum Direction {TOP, BOTTOM, LEFT, RIGHT,  // Horizontal and vertical
         TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT};  // Corners
 
-// Buffers for receiving particles
-vector<particle_t*> recv_buffers[8];
+// Buffers for receiving particles from 8 neighbors
+vector<particle_t*> Recv_Buffers[8];
 
 //////////////////////////////////////// Helper Functions ////////////////////////////////////////
 
@@ -51,40 +51,108 @@ inline void put_particle_to_bin(particle_t& pt) {
 }
 
 // Get the rank of a neighbor processor
-inline int get_neighbor_proc_rank(int my_rank, Neighbor neighbor_enum) {
-    int neighbor_rank;
-    switch (neighbor_enum) {
+inline int get_neighbor_proc_rank(Direction nei_dir) {
+    int nei_row_idx = My_Row_Idx;
+    int nei_col_idx = My_Col_Idx;
+
+    switch (nei_dir) {
         case TOP_LEFT:
-            neighbor_rank = my_rank - Num_Proc_Per_Side - 1;
+            nei_row_idx -= 1;
+            nei_col_idx -= 1;
             break;
         case TOP:
-            neighbor_rank = my_rank - Num_Proc_Per_Side;
+            nei_row_idx -= 1;
             break;
-        case TOP_RIGHT:  // Top-right neighbor
-            neighbor_rank = my_rank - Num_Proc_Per_Side + 1;
+        case TOP_RIGHT:
+            nei_row_idx -= 1;
+            nei_col_idx += 1;
             break;
-        case LEFT:  // Left neighbor
-            neighbor_rank = my_rank - 1;
+        case LEFT:
+            nei_col_idx -= 1;
             break;
-        case RIGHT:  // Right neighbor
-            neighbor_rank = my_rank + 1;
+        case RIGHT:
+            nei_col_idx += 1;
             break;
-        case BOTTOM_LEFT:  // Bottom-left neighbor
-            neighbor_rank = my_rank + Num_Proc_Per_Side - 1;
+        case BOTTOM_LEFT:
+            nei_row_idx += 1;
+            nei_col_idx -= 1;
             break;
-        case BOTTOM:  // Bottom neighbor
-            neighbor_rank = my_rank + Num_Proc_Per_Side;
+        case BOTTOM:
+            nei_row_idx += 1;
             break;
-        case BOTTOM_RIGHT:  // Bottom-right neighbor
-            neighbor_rank = my_rank + Num_Proc_Per_Side + 1;
+        case BOTTOM_RIGHT:
+            nei_row_idx += 1;
+            nei_col_idx += 1;
             break;
         default:
-            neighbor_rank = -1;
+            return -1;
     }
-    if (neighbor_rank < 0 ||
-        neighbor_rank >= Num_Proc_Per_Side * Num_Proc_Per_Side)
+
+    if (nei_row_idx < 0 || nei_row_idx >= Num_Proc_Per_Side ||
+        nei_col_idx < 0 || nei_col_idx >= Num_Proc_Per_Side)
         return -1;
-    return neighbor_rank;
+    return nei_row_idx * Num_Proc_Per_Side + nei_col_idx;;
+}
+
+// Collect particles from certain bins and put them in a vector
+void collect_particles_from_bins(Direction direction, vector<particle_t*>& pt_vec) {
+    int N_padded = Num_Bins_Per_Proc_Side + 2;
+    if (direction == TOP || direction == BOTTOM) {
+        int row_idx = direction == TOP ? 1 : Num_Bins_Per_Proc_Side;
+        for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
+            unordered_set<particle_t*>& bin = Bins[row_idx * N_padded + i];
+            pt_vec.insert(pt_vec.end(), bin.begin(), bin.end());
+        }
+    } else if (direction == LEFT || direction == RIGHT) {
+        int col_idx = direction == LEFT ? 1 : Num_Bins_Per_Proc_Side;
+        for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
+            unordered_set<particle_t*>& bin = Bins[i * N_padded + col_idx];
+            pt_vec.insert(pt_vec.end(), bin.begin(), bin.end());
+        }
+    }
+}
+
+// Communicate with horizontal and vertical neighbors | TODO: add assertion check
+void communicate_with_non_diagonal_neighbors(Direction nei_dir) {
+    int nei_rank = get_neighbor_proc_rank(nei_dir);
+    if (nei_rank != -1) {  // If neighbor exists
+        // Collect to-be-sent particles from their bins
+        vector<particle_t*> pt_vec(Num_Bins_Per_Proc_Side);
+        collect_particles_from_bins(nei_dir, pt_vec);
+        // Get the receiving buffer
+        vector<particle_t*>& buffer = Recv_Buffers[nei_dir];
+        // Send and receive
+        MPI_Status status;
+        MPI_Sendrecv(&pt_vec[0], pt_vec.size(), PARTICLE,
+                     nei_rank, 1234,
+                     &buffer[0], MAX_NUM_PT_PER_BIN * Num_Bins_Per_Proc_Side,
+                     PARTICLE, nei_rank, 1234,
+                     MPI_COMM_WORLD, &status);
+    }
+}
+
+// Communicate with diagonal processors | TODO: add assertion check
+void communicate_with_diagonal_neighbors(Direction nei_dir) {
+    int nei_rank = get_neighbor_proc_rank(nei_dir);
+    if (nei_rank != -1) {  // If the neighbor exists
+        // Copy all the points in the bin to a vector
+        unordered_set<particle_t *>& my_bin = Bins[0];
+        vector<particle_t*> my_pts(my_bin.begin(), my_bin.end());
+        // Get the receiving buffer
+        vector<particle_t*>& buffer = Recv_Buffers[nei_dir];
+        MPI_Status status;
+        // Send and receive
+        MPI_Sendrecv(&my_pts[0], my_pts.size(), PARTICLE,
+                     nei_rank, 5678,
+                     &buffer[0], MAX_NUM_PT_PER_BIN, PARTICLE,
+                     nei_rank, 5678,
+                     MPI_COMM_WORLD, &status);
+    }
+}
+
+// Is the rank used in actual computation?
+bool is_useful_rank(int rank) {
+    return rank < Num_Proc_Per_Side * Num_Proc_Per_Side;
 }
 
 ///////////////////////////////////////// Key Functions /////////////////////////////////////////
@@ -93,6 +161,7 @@ inline int get_neighbor_proc_rank(int my_rank, Neighbor neighbor_enum) {
 void init_simulation(particle_t* parts, int num_parts, double size, int rank, int num_proc) {
     // Calculate necessary global constants
     Num_Proc_Per_Side = floor( sqrt(num_proc) );
+    if (!is_useful_rank(rank)) return;
     Proc_Size = size / Num_Proc_Per_Side;
     Num_Bins_Per_Proc_Side = ceil(Proc_Size / BIN_SIZE);
 
@@ -113,69 +182,33 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
             put_particle_to_bin(pt);
         }
     }
+
+    // Allocate memory to receiving buffers
+    Recv_Buffers[TOP].reserve(MAX_NUM_PT_PER_BIN * Num_Bins_Per_Proc_Side);
+    Recv_Buffers[BOTTOM].reserve(MAX_NUM_PT_PER_BIN * Num_Bins_Per_Proc_Side);
+    Recv_Buffers[LEFT].reserve(MAX_NUM_PT_PER_BIN * Num_Bins_Per_Proc_Side);
+    Recv_Buffers[RIGHT].reserve(MAX_NUM_PT_PER_BIN * Num_Bins_Per_Proc_Side);
+    Recv_Buffers[TOP_LEFT].reserve(MAX_NUM_PT_PER_BIN);
+    Recv_Buffers[TOP_RIGHT].reserve(MAX_NUM_PT_PER_BIN);
+    Recv_Buffers[BOTTOM_LEFT].reserve(MAX_NUM_PT_PER_BIN);
+    Recv_Buffers[BOTTOM_RIGHT].reserve(MAX_NUM_PT_PER_BIN);
 }
 
 void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, int num_proc) {
+    if (is_useful_rank(rank)) {
+        // Communicate with horizontal and vertical neighbor processors
+        communicate_with_non_diagonal_neighbors(TOP);
+        communicate_with_non_diagonal_neighbors(BOTTOM);
+        communicate_with_non_diagonal_neighbors(LEFT);
+        communicate_with_non_diagonal_neighbors(RIGHT);
+        // Communicate with diagonal processors
+        communicate_with_diagonal_neighbors(TOP_LEFT);
+        communicate_with_diagonal_neighbors(TOP_RIGHT);
+        communicate_with_diagonal_neighbors(BOTTOM_LEFT);
+        communicate_with_diagonal_neighbors(BOTTOM_RIGHT);
+    }
 
-//    MPI_Status stats[8];
-//    // Communicate with neighbor processors
-//    // Top
-//    int top_rank = get_neighbor_proc_rank(rank, 2);
-//    if (top_rank != -1) {
-//
-//    }
-//    // Bottom
-//    int bottom_rank = get_neighbor_proc_rank(rank, 8);
-//    // Left
-//    int left_rank = get_neighbor_proc_rank(rank, 4);
-//    // Right
-//    int right_rank = get_neighbor_proc_rank(rank, 6);
-//    // Corner bins
-//    // Top-left
-//    int top_left_rank = get_neighbor_proc_rank(rank, TOP_LEFT);
-//    if (top_left_rank != -1) {
-//        unordered_set<particle_t *>& top_left_bin = Bins[0];
-//        vector<particle_t*> top_left_pts(top_left_bin.begin(), top_left_bin.end());
-//        recv_buffers[TOP_LEFT].resize(MAX_NUM_PT_PER_BIN);
-//        MPI_Status status;
-//        MPI_Sendrecv(&top_left_pts[0], top_left_pts.size(), PARTICLE,
-//                     top_left_rank, MPI_ANY_TAG,
-//                     &recv_buffers[TOP_LEFT][0], MAX_NUM_PT_PER_BIN, PARTICLE,
-//                     top_left_rank, MPI_ANY_TAG,
-//                     MPI_COMM_WORLD, &status);
-//    }
-//    // Top-right
-//    int top_right_rank = get_neighbor_proc_rank(rank, 3);
-//    // Bottom-left
-//    int bottom_left_rank = get_neighbor_proc_rank(rank, 7);
-//    // Bottom-right
-//    int bottom_right_rank = get_neighbor_proc_rank(rank, 9);
-
-//    // Apply_Force()
-//    MPI_Request request, request2;
-//    MPI_Status status;
-//    int top_left_rank = get_neighbor_proc_rank(rank, 1);
-//    if (top_left_rank != -1) {
-//
-////        cout << "sending " << Bins[0].size() << " pts to " << top_left_rank << endl;
-//    }
-////
-//    std::vector<uint32_t> recv_buffer;
-//    recv_buffer.resize(20);
-//    int bottom_right_rank = get_neighbor_proc_rank(rank, 9);
-//    if (bottom_right_rank != -1) {
-//        MPI_Irecv(&recv_buffer[0], 20, PARTICLE, bottom_right_rank,
-//                0, MPI_COMM_WORLD, &request2);
-////        cout << "receiving from " << bottom_right_rank << endl;
-//    }
-//
-//    if (top_left_rank != -1) {
-//        MPI_Wait(&request, &status);
-//    }
-//
-//    if (bottom_right_rank != -1) {
-//        MPI_Wait(&request2, &status);
-//    }
+    MPI_Barrier(MPI_COMM_WORLD);
 
     // Move()
     // TODO: implement
