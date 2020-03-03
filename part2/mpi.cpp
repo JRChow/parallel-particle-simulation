@@ -4,6 +4,7 @@
 #include <cmath>
 #include <unordered_set>
 #include <vector>
+#include <unordered_map>
 
 using namespace std;
 
@@ -33,6 +34,9 @@ enum Direction {
 
 // Buffers for receiving particles from 8 neighbors
 vector<particle_t *> Recv_Buffers[8];
+
+// A map between process rank and particles to be send
+unordered_map<int, vector<particle_t *>> Map;
 
 //////////////////////////////////////// Helper Functions ////////////////////////////////////////
 
@@ -255,18 +259,14 @@ void init_simulation(particle_t *parts, int num_parts, double size, int rank, in
     Recv_Buffers[TOP_RIGHT].reserve(MAX_NUM_PT_PER_BIN);
     Recv_Buffers[BOTTOM_LEFT].reserve(MAX_NUM_PT_PER_BIN);
     Recv_Buffers[BOTTOM_RIGHT].reserve(MAX_NUM_PT_PER_BIN);
-
-    // A map between process rank and particles to be send
-    Map = new unordered_map<int, vector<particle_t*>>;
-
 }
 
 
-void move(particle_t &p, double size){
-    
-    int oldRow = floor( (p.x - My_Min_X) / BIN_SIZE ) +1;
-    int oldCol = floor( (p.y - My_Min_Y) / BIN_SIZE ) +1;
-    int oldRank = calculate_particle_rank(*p);
+void move(particle_t &p, double size) {
+
+    int oldRow = floor((p.x - My_Min_X) / BIN_SIZE) + 1;
+    int oldCol = floor((p.y - My_Min_Y) / BIN_SIZE) + 1;
+    int oldRank = calculate_particle_rank(p);
     int oldIdx = oldRow * Num_Bins_Per_Proc_Side + oldCol;
 
     p.vx += p.ax * dt;
@@ -286,39 +286,41 @@ void move(particle_t &p, double size){
     }
 
     // Put the particle into new places
-    int newRank = calculate_particle_rank(*p);
+    int newRank = calculate_particle_rank(p);
 
-    if (newRank != oldRank){
+    if (newRank != oldRank) {
         Bins[oldIdx].erase(&p);
-        Map[newRank].push_back(p);
+        Map[newRank].push_back(&p);
 
-    } else{
-        int newRow = floor( (p.x - My_Min_X) / BIN_SIZE ) +1;
-        int newCol = floor( (p.y - My_Min_Y) / BIN_SIZE ) +1;
+    } else {
+        int newRow = floor((p.x - My_Min_X) / BIN_SIZE) + 1;
+        int newCol = floor((p.y - My_Min_Y) / BIN_SIZE) + 1;
         int newIdx = newRow * Num_Bins_Per_Proc_Side + newCol;
-        
-        if (newIdx != oldIdx){
+
+        if (newIdx != oldIdx) {
             Bins[oldIdx].erase(&p);
             Bins[newIdx].insert(&p);
+        }
     }
 }
 
-void move_particle_cross_processor(int num_proc){
-    for (int i=0; i<num_proc; ++i){
-        vector<particle_t*> go(10);
-        search = Map.find(i);
-        if (search != Map.end()){
+void move_particle_cross_processor(int num_proc) {
+    for (int i = 0; i < num_proc; ++i) {
+        vector<particle_t *> go(10);
+        auto search = Map.find(i);
+        if (search != Map.end()) {
             go = Map.at(i);
-        MPI_Send(go, go.size(), PARTICLE, i, 0, MPI_COMM_WORLD);
+            MPI_Send(&go[0], go.size(), PARTICLE, i, 0, MPI_COMM_WORLD);
+        }
     }
 
-    for (int i = 0; i<num_proc; ++i){
-        vector<particle_t*> come(10);
+    for (int i = 0; i < num_proc; ++i) {
+        vector<particle_t *> come(10);
         MPI_Status status;
-        MPI_Recv(come, come.size(), PARTICLE, i, 0, MPI_COMM_WORLD, &status);
-        for (int j=0; j<come.size(); ++j){
-            particle_t &pt = come[j];
-            put_particle_to_bin(pt);
+        MPI_Recv(&come[0], come.size(), PARTICLE, i, 0, MPI_COMM_WORLD, &status);
+        for (int j = 0; j < come.size(); ++j) {
+            particle_t *pt = come[j];
+            put_particle_to_bin(*pt);
         }
     }
 }
@@ -348,11 +350,12 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
     MPI_Barrier(MPI_COMM_WORLD);
 
     // Move()
-    // TODO: implement
     for (int i = 0; i < num_parts; ++i) {
         move(parts[i], size);
     }
     move_particle_cross_processor(num_proc);
+
+    MPI_Barrier(MPI_COMM_WORLD);
 }
 
 /* Write this function such that at the end of it, the master (rank == 0)
