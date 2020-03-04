@@ -50,7 +50,7 @@ inline int calculate_particle_rank(const particle_t &pt) {
 }
 
 // Get the particle's index in the Bins array
-inline int which_bin(const particle_t& pt) {
+inline int which_bin(const particle_t &pt) {
     int row_idx = static_cast <int> (floor((pt.x - My_Min_X) / BIN_SIZE)) + 1;
     int col_idx = static_cast <int> (floor((pt.y - My_Min_Y) / BIN_SIZE)) + 1;
     return row_idx * (Num_Bins_Per_Proc_Side + 2) + col_idx;
@@ -275,7 +275,6 @@ void move(particle_t &p, double size) {
 
     // Put the particle into new places
     int newRank = calculate_particle_rank(p);
-
     if (newRank != oldRank) {  // If the particle jumps to a new processor
         Bins[oldIdx].erase(&p);
         Map[newRank].push_back(p);
@@ -382,15 +381,19 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
 
     MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
 
-    if (is_useful_rank(rank)){
-    // Move()
-        for (int i=0; i<total_num_bins; ++i){
-            for (auto &pt : Bins[i]){
-                move(*pt, size);
+    if (is_useful_rank(rank)) {
+        // Iterate over inner bins that belong to this processor
+        for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
+            for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
+                int idx = r * (Num_Bins_Per_Proc_Side + 2) + c;
+                // Move particles in each bin
+                for (auto& pt : Bins[idx]) {
+                    move(*pt, size);
+                }
             }
         }
+        move_particle_cross_processor(num_proc);
     }
-    move_particle_cross_processor(num_proc);
 
     MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
 }
