@@ -382,9 +382,13 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
 
     MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
 
+    if (is_useful_rank(rank)){
     // Move()
-    for (int i = 0; i < num_parts; ++i) {
-        move(parts[i], size);
+        for (int i=0; i<total_num_bins; ++i){
+            for (auto &pt : Bins[i]){
+                move(*pt, size);
+            }
+        }
     }
     move_particle_cross_processor(num_proc);
 
