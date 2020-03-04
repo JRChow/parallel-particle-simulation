@@ -276,7 +276,6 @@ void move(particle_t &p, double size) {
     if (newRank != oldRank) {
         Bins[oldIdx].erase(&p);
         Map[newRank].push_back(p);
-
     } else {
         int newRow = static_cast <int>(floor((p.x - My_Min_X) / BIN_SIZE)) + 1;
         int newCol = static_cast <int>(floor((p.y - My_Min_Y) / BIN_SIZE)) + 1;
