@@ -34,7 +34,7 @@ enum Direction {
 };
 
 // Buffers for receiving particles from 8 neighbors
-vector<particle_t *> Recv_Buffers[8];
+vector<particle_t> Recv_Buffers[8];
 
 // A map between process rank and particles to be send
 unordered_map<int, vector<particle_t *>> Map;
@@ -98,7 +98,7 @@ inline int get_neighbor_proc_rank(Direction nei_dir) {
     if (nei_row_idx < 0 || nei_row_idx >= Num_Proc_Per_Side ||
         nei_col_idx < 0 || nei_col_idx >= Num_Proc_Per_Side)
         return -1;
-    return nei_row_idx * Num_Proc_Per_Side + nei_col_idx;;
+    return nei_row_idx * Num_Proc_Per_Side + nei_col_idx;
 }
 
 // Add all particles in a bin to a vector
@@ -133,16 +133,17 @@ void collect_pts_from_all_my_bins(vector<particle_t> &dest_vec) {
     for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
         for (int j = 1; j <= Num_Bins_Per_Proc_Side; ++j) {
             auto &bin = Bins[i * N + j];
-            add_all_pts_from_bin_to_vec_as_struct(bin, dest_vec)
+            add_all_pts_from_bin_to_vec_as_struct(bin, dest_vec);
         }
     }
 }
 
 // Put particles in the receiving buffer into correct bins
-void put_buffered_particles_into_bins(Direction which_bins) {
-    vector<particle_t *> &buffer = Recv_Buffers[which_bins];
-    for (auto &pt : buffer) {
-        put_particle_to_bin(*pt);
+void put_buffered_particles_into_bins(Direction which_border, int num_pts) {
+    vector<particle_t> &buffer = Recv_Buffers[which_border];
+    for (int i = 0; i < num_pts; i++) {
+        particle_t& pt = buffer[i];
+        put_particle_to_bin(pt);
     }
 }
 
@@ -151,10 +152,10 @@ void communicate_with_non_diagonal_neighbors(Direction nei_dir) {
     int nei_rank = get_neighbor_proc_rank(nei_dir);
     if (nei_rank != -1) {  // If neighbor exists
         // Collect to-be-sent particles from their bins
-        vector<particle_t *> pt_vec(Num_Bins_Per_Proc_Side);
+        vector<particle_t> pt_vec;
         collect_pts_from_halo_bins(nei_dir, pt_vec);
         // Get the receiving buffer
-        vector<particle_t *> &buffer = Recv_Buffers[nei_dir];
+        vector<particle_t> &buffer = Recv_Buffers[nei_dir];
         // Send and receive
         MPI_Status status;
         MPI_Sendrecv(&pt_vec[0], pt_vec.size(), PARTICLE,
@@ -162,8 +163,10 @@ void communicate_with_non_diagonal_neighbors(Direction nei_dir) {
                      &buffer[0], MAX_NUM_PT_PER_BIN * Num_Bins_Per_Proc_Side,
                      PARTICLE, nei_rank, 1234,
                      MPI_COMM_WORLD, &status);
+        int recv_cnt;
+        MPI_Get_count(&status, PARTICLE, &recv_cnt);
         // Fill received particles into right bins
-        put_buffered_particles_into_bins(nei_dir);
+        put_buffered_particles_into_bins(nei_dir, recv_cnt);
     }
 }
 
@@ -173,9 +176,10 @@ void communicate_with_diagonal_neighbors(Direction nei_dir) {
     if (nei_rank != -1) {  // If the neighbor exists
         // Copy all the points in the bin to a vector
         unordered_set<particle_t *> &my_bin = Bins[0];
-        vector<particle_t *> my_pts(my_bin.begin(), my_bin.end());
+        vector<particle_t> my_pts;
+        add_all_pts_from_bin_to_vec_as_struct(my_bin, my_pts);
         // Get the receiving buffer
-        vector<particle_t *> &buffer = Recv_Buffers[nei_dir];
+        vector<particle_t> &buffer = Recv_Buffers[nei_dir];
         MPI_Status status;
         // Send and receive
         MPI_Sendrecv(&my_pts[0], my_pts.size(), PARTICLE,
@@ -183,8 +187,10 @@ void communicate_with_diagonal_neighbors(Direction nei_dir) {
                      &buffer[0], MAX_NUM_PT_PER_BIN, PARTICLE,
                      nei_rank, 5678,
                      MPI_COMM_WORLD, &status);
+        int recv_cnt;
+        MPI_Get_count(&status, PARTICLE, &recv_cnt);
         // Fill received particles into right bins
-        put_buffered_particles_into_bins(nei_dir);
+        put_buffered_particles_into_bins(nei_dir, recv_cnt);
     }
 }
 
@@ -324,7 +330,6 @@ void init_simulation(particle_t *parts, int num_parts, double size, int rank, in
     if (!is_useful_rank(rank)) return;
     Proc_Size = size / Num_Proc_Per_Side;
     Num_Bins_Per_Proc_Side = ceil(Proc_Size / BIN_SIZE);
-
 
     // Calculate variables specific to this processor
     My_Row_Idx = rank / Num_Proc_Per_Side;
