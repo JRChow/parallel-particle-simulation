@@ -142,7 +142,7 @@ void collect_pts_from_all_my_bins(vector<particle_t> &dest_vec) {
 void put_buffered_particles_into_bins(Direction which_border, int num_pts) {
     vector<particle_t> &buffer = Recv_Buffers[which_border];
     for (int i = 0; i < num_pts; i++) {
-        particle_t& pt = buffer[i];
+        particle_t &pt = buffer[i];
         put_particle_to_bin(pt);
     }
 }
@@ -304,8 +304,8 @@ void move_particle_cross_processor(int num_proc) {
         vector<particle_t> come(MAX_NUM_PT_PER_BIN * Num_Bins_Per_Proc);
         MPI_Status status;
         MPI_Recv(&come[0], come.size(), PARTICLE, i, 0, MPI_COMM_WORLD, &status);
-        for (auto pt : come) {
-            put_particle_to_bin(&pt);
+        for (auto &pt : come) {
+            put_particle_to_bin(pt);
         }
     }
 }
