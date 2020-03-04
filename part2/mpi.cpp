@@ -361,10 +361,6 @@ void init_simulation(particle_t *parts, int num_parts, double size, int rank, in
 
 void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, int num_proc) {
     if (is_useful_rank(rank)) {
-//        if (rank == 0) {
-//            cout << "communicating..." << endl;
-//        }
-
         // Communicate with horizontal and vertical neighbor processors
         communicate_with_non_diagonal_neighbors(TOP);
         communicate_with_non_diagonal_neighbors(BOTTOM);
@@ -376,10 +372,6 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
         communicate_with_diagonal_neighbors(BOTTOM_LEFT);
         communicate_with_diagonal_neighbors(BOTTOM_RIGHT);
 
-//        if (rank == 0) {
-//            cout << "comm done, apply_force()..." << endl;
-//        }
-
         // Apply forces in each bin
         for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
             for (int j = 1; j <= Num_Bins_Per_Proc_Side; ++j) {
@@ -390,26 +382,15 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
 
     MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
 
-    if (rank == 0) {
-        cout << "apply_force() done (passed barrier), start move()..." << endl;
-    }
-
-    if (is_useful_rank(rank)) {
-        // Move()
-        for (int i = 0; i < num_parts; ++i) {
-            move(parts[i], size);
+    if (is_useful_rank(rank)){
+    // Move()
+        for (int i=0; i<total_num_bins; ++i){
+            for (auto &pt : Bins[i]){
+                move(*pt, size);
+            }
         }
-
-//        if (rank == 0) {
-//            cout << "move() done! start move_particle_cross_processor()..." << endl;
-//        }
-
-        move_particle_cross_processor(num_proc);
     }
-
-    if (rank == 0) {
-        cout << "move_particle_cross_processor() done!" << endl;
-    }
+    move_particle_cross_processor(num_proc);
 
     MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
 }
