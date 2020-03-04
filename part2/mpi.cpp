@@ -49,11 +49,16 @@ inline int calculate_particle_rank(const particle_t &pt) {
     return row_idx * Num_Proc_Per_Side + col_idx;
 }
 
-// Insert the input particle to the correct bin
-inline void put_particle_to_bin(particle_t &pt) {
+// Get the particle's index in the Bins array
+inline int which_bin(const particle_t& pt) {
     int row_idx = static_cast <int> (floor((pt.x - My_Min_X) / BIN_SIZE)) + 1;
     int col_idx = static_cast <int> (floor((pt.y - My_Min_Y) / BIN_SIZE)) + 1;
-    int idx = row_idx * Num_Bins_Per_Proc_Side + col_idx;
+    return row_idx * (Num_Bins_Per_Proc_Side + 2) + col_idx;
+}
+
+// Insert the input particle to the correct bin
+inline void put_particle_to_bin(particle_t &pt) {
+    int idx = which_bin(pt);
     Bins[idx].insert(&pt);
 }
 
@@ -249,10 +254,8 @@ inline void calculate_bin_forces(int row, int col) {
 }
 
 void move(particle_t &p, double size) {
-    int oldRow = static_cast <int>(floor((p.x - My_Min_X) / BIN_SIZE)) + 1;
-    int oldCol = static_cast <int>(floor((p.y - My_Min_Y) / BIN_SIZE)) + 1;
+    int oldIdx = which_bin(p);
     int oldRank = calculate_particle_rank(p);
-    int oldIdx = oldRow * Num_Bins_Per_Proc_Side + oldCol;
 
     p.vx += p.ax * dt;
     p.vy += p.ay * dt;
@@ -273,15 +276,12 @@ void move(particle_t &p, double size) {
     // Put the particle into new places
     int newRank = calculate_particle_rank(p);
 
-    if (newRank != oldRank) {
+    if (newRank != oldRank) {  // If the particle jumps to a new processor
         Bins[oldIdx].erase(&p);
         Map[newRank].push_back(p);
-    } else {
-        int newRow = static_cast <int>(floor((p.x - My_Min_X) / BIN_SIZE)) + 1;
-        int newCol = static_cast <int>(floor((p.y - My_Min_Y) / BIN_SIZE)) + 1;
-        int newIdx = newRow * Num_Bins_Per_Proc_Side + newCol;
-
-        if (newIdx != oldIdx) {
+    } else {  // The particle stays in this processor
+        int newIdx = which_bin(p);
+        if (newIdx != oldIdx) {  // If the particle jumps to a different bin
             Bins[oldIdx].erase(&p);
             Bins[newIdx].insert(&p);
         }
@@ -361,6 +361,10 @@ void init_simulation(particle_t *parts, int num_parts, double size, int rank, in
 
 void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, int num_proc) {
     if (is_useful_rank(rank)) {
+//        if (rank == 0) {
+//            cout << "communicating..." << endl;
+//        }
+
         // Communicate with horizontal and vertical neighbor processors
         communicate_with_non_diagonal_neighbors(TOP);
         communicate_with_non_diagonal_neighbors(BOTTOM);
@@ -372,6 +376,10 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
         communicate_with_diagonal_neighbors(BOTTOM_LEFT);
         communicate_with_diagonal_neighbors(BOTTOM_RIGHT);
 
+//        if (rank == 0) {
+//            cout << "comm done, apply_force()..." << endl;
+//        }
+
         // Apply forces in each bin
         for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
             for (int j = 1; j <= Num_Bins_Per_Proc_Side; ++j) {
@@ -382,11 +390,26 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
 
     MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
 
-    // Move()
-    for (int i = 0; i < num_parts; ++i) {
-        move(parts[i], size);
+    if (rank == 0) {
+        cout << "apply_force() done (passed barrier), start move()..." << endl;
     }
-    move_particle_cross_processor(num_proc);
+
+    if (is_useful_rank(rank)) {
+        // Move()
+        for (int i = 0; i < num_parts; ++i) {
+            move(parts[i], size);
+        }
+
+//        if (rank == 0) {
+//            cout << "move() done! start move_particle_cross_processor()..." << endl;
+//        }
+
+        move_particle_cross_processor(num_proc);
+    }
+
+    if (rank == 0) {
+        cout << "move_particle_cross_processor() done!" << endl;
+    }
 
     MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
 }
