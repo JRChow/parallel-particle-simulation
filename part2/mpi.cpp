@@ -16,6 +16,7 @@ using namespace std;
 #define MAX_NUM_PT_PER_BIN 5
 
 int Num_Proc_Per_Side;  // Number of processors per side
+int Num_Useful_Proc;  // Total number of processors involved in computation
 double Proc_Size;  // Size of a processor's side
 int Num_Bins_Per_Proc_Side;  // Number of bins on a processor's side
 
@@ -100,20 +101,39 @@ inline int get_neighbor_proc_rank(Direction nei_dir) {
     return nei_row_idx * Num_Proc_Per_Side + nei_col_idx;;
 }
 
+// Add all particles in a bin to a vector
+void add_all_pts_from_bin_to_vec_as_struct(const unordered_set<particle_t *> &bin,
+                                           vector<particle_t> &vec) {
+    for (auto &pt : bin) {
+        vec.push_back(*pt);
+    }
+}
+
 // Collect particles from certain bins and put them in a vector
-void collect_particles_from_bins(Direction which_bins, vector<particle_t *> &pt_vec) {
+void collect_pts_from_halo_bins(Direction which_border, vector<particle_t> &pt_vec) {
     int N_padded = Num_Bins_Per_Proc_Side + 2;
-    if (which_bins == TOP || which_bins == BOTTOM) {
-        int row_idx = which_bins == TOP ? 1 : Num_Bins_Per_Proc_Side;
+    if (which_border == TOP || which_border == BOTTOM) {
+        int row_idx = which_border == TOP ? 1 : Num_Bins_Per_Proc_Side;
         for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
-            unordered_set<particle_t *> &bin = Bins[row_idx * N_padded + i];
-            pt_vec.insert(pt_vec.end(), bin.begin(), bin.end());
+            auto &bin = Bins[row_idx * N_padded + i];
+            add_all_pts_from_bin_to_vec_as_struct(bin, pt_vec);
         }
-    } else if (which_bins == LEFT || which_bins == RIGHT) {
-        int col_idx = which_bins == LEFT ? 1 : Num_Bins_Per_Proc_Side;
+    } else if (which_border == LEFT || which_border == RIGHT) {
+        int col_idx = which_border == LEFT ? 1 : Num_Bins_Per_Proc_Side;
         for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
-            unordered_set<particle_t *> &bin = Bins[i * N_padded + col_idx];
-            pt_vec.insert(pt_vec.end(), bin.begin(), bin.end());
+            auto &bin = Bins[i * N_padded + col_idx];
+            add_all_pts_from_bin_to_vec_as_struct(bin, pt_vec);
+        }
+    }
+}
+
+// Collect all particle structs from my inner bins
+void collect_pts_from_all_my_bins(vector<particle_t> &dest_vec) {
+    int N = Num_Bins_Per_Proc_Side + 2;
+    for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
+        for (int j = 1; j <= Num_Bins_Per_Proc_Side; ++j) {
+            auto &bin = Bins[i * N + j];
+            add_all_pts_from_bin_to_vec_as_struct(bin, dest_vec)
         }
     }
 }
@@ -132,7 +152,7 @@ void communicate_with_non_diagonal_neighbors(Direction nei_dir) {
     if (nei_rank != -1) {  // If neighbor exists
         // Collect to-be-sent particles from their bins
         vector<particle_t *> pt_vec(Num_Bins_Per_Proc_Side);
-        collect_particles_from_bins(nei_dir, pt_vec);
+        collect_pts_from_halo_bins(nei_dir, pt_vec);
         // Get the receiving buffer
         vector<particle_t *> &buffer = Recv_Buffers[nei_dir];
         // Send and receive
@@ -170,7 +190,7 @@ void communicate_with_diagonal_neighbors(Direction nei_dir) {
 
 // Is the rank used in actual computation?
 inline bool is_useful_rank(int rank) {
-    return rank < Num_Proc_Per_Side * Num_Proc_Per_Side;
+    return rank < Num_Useful_Proc;
 }
 
 // Apply the force from neighbor to particle
@@ -285,23 +305,10 @@ void move_particle_cross_processor(int num_proc) {
     }
 }
 
-// Collect all particle structs from my inner bins.
-void collect_pts_from_all_my_bins(vector<particle_t> &dest_vec) {
-    int N = Num_Bins_Per_Proc_Side + 2;
-    for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
-        for (int j = 1; j <= Num_Bins_Per_Proc_Side; ++j) {
-            auto &bin = Bins[i * N + j];
-            for (auto &pt : bin) {
-                dest_vec.push_back(*pt);
-            }
-        }
-    }
-}
-
 // Write particle structs in the source array to correct slots in the destination array
-void write_pts_to_dest_arr(particle_t* src_pts_arr, int N_src, particle_t *dest_pts_arr) {
+void write_pts_to_dest_arr(particle_t *src_pts_arr, int N_src, particle_t *dest_pts_arr) {
     for (int i = 0; i < N_src; ++i) {
-        particle_t& pt = src_pts_arr[i];
+        particle_t &pt = src_pts_arr[i];
         uint64_t idx = pt.id - 1;
         dest_pts_arr[idx] = pt;
     }
@@ -313,9 +320,11 @@ void write_pts_to_dest_arr(particle_t* src_pts_arr, int N_src, particle_t *dest_
 void init_simulation(particle_t *parts, int num_parts, double size, int rank, int num_proc) {
     // Calculate necessary global constants
     Num_Proc_Per_Side = floor(sqrt(num_proc));
+    Num_Useful_Proc = Num_Proc_Per_Side * Num_Proc_Per_Side;
     if (!is_useful_rank(rank)) return;
     Proc_Size = size / Num_Proc_Per_Side;
     Num_Bins_Per_Proc_Side = ceil(Proc_Size / BIN_SIZE);
+
 
     // Calculate variables specific to this processor
     My_Row_Idx = rank / Num_Proc_Per_Side;
@@ -403,8 +412,7 @@ void gather_for_save(particle_t *parts, int num_parts, double size, int rank, in
         vector<particle_t> buffer(max_num_pts_per_proc);
 
         // Receive particles from all other useful processors
-        int N_useful_proc = Num_Proc_Per_Side * Num_Proc_Per_Side;
-        for (int r = 1; r < N_useful_proc; ++r) {
+        for (int r = 1; r < Num_Useful_Proc; ++r) {
             MPI_Status status;
             MPI_Recv(&buffer[0], max_num_pts_per_proc, PARTICLE, r,
                      MPI_ANY_TAG, MPI_COMM_WORLD, &status);
