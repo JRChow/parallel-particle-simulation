@@ -106,13 +106,13 @@ void collect_particles_from_bins(Direction which_bins, vector<particle_t *> &pt_
     if (which_bins == TOP || which_bins == BOTTOM) {
         int row_idx = which_bins == TOP ? 1 : Num_Bins_Per_Proc_Side;
         for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
-            unordered_set < particle_t * > &bin = Bins[row_idx * N_padded + i];
+            unordered_set<particle_t *> &bin = Bins[row_idx * N_padded + i];
             pt_vec.insert(pt_vec.end(), bin.begin(), bin.end());
         }
     } else if (which_bins == LEFT || which_bins == RIGHT) {
         int col_idx = which_bins == LEFT ? 1 : Num_Bins_Per_Proc_Side;
         for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
-            unordered_set < particle_t * > &bin = Bins[i * N_padded + col_idx];
+            unordered_set<particle_t *> &bin = Bins[i * N_padded + col_idx];
             pt_vec.insert(pt_vec.end(), bin.begin(), bin.end());
         }
     }
@@ -120,7 +120,7 @@ void collect_particles_from_bins(Direction which_bins, vector<particle_t *> &pt_
 
 // Put particles in the receiving buffer into correct bins
 void put_buffered_particles_into_bins(Direction which_bins) {
-    vector < particle_t * > &buffer = Recv_Buffers[which_bins];
+    vector<particle_t *> &buffer = Recv_Buffers[which_bins];
     for (auto &pt : buffer) {
         put_particle_to_bin(*pt);
     }
@@ -131,10 +131,10 @@ void communicate_with_non_diagonal_neighbors(Direction nei_dir) {
     int nei_rank = get_neighbor_proc_rank(nei_dir);
     if (nei_rank != -1) {  // If neighbor exists
         // Collect to-be-sent particles from their bins
-        vector < particle_t * > pt_vec(Num_Bins_Per_Proc_Side);
+        vector<particle_t *> pt_vec(Num_Bins_Per_Proc_Side);
         collect_particles_from_bins(nei_dir, pt_vec);
         // Get the receiving buffer
-        vector < particle_t * > &buffer = Recv_Buffers[nei_dir];
+        vector<particle_t *> &buffer = Recv_Buffers[nei_dir];
         // Send and receive
         MPI_Status status;
         MPI_Sendrecv(&pt_vec[0], pt_vec.size(), PARTICLE,
@@ -152,10 +152,10 @@ void communicate_with_diagonal_neighbors(Direction nei_dir) {
     int nei_rank = get_neighbor_proc_rank(nei_dir);
     if (nei_rank != -1) {  // If the neighbor exists
         // Copy all the points in the bin to a vector
-        unordered_set < particle_t * > &my_bin = Bins[0];
-        vector < particle_t * > my_pts(my_bin.begin(), my_bin.end());
+        unordered_set<particle_t *> &my_bin = Bins[0];
+        vector<particle_t *> my_pts(my_bin.begin(), my_bin.end());
         // Get the receiving buffer
-        vector < particle_t * > &buffer = Recv_Buffers[nei_dir];
+        vector<particle_t *> &buffer = Recv_Buffers[nei_dir];
         MPI_Status status;
         // Send and receive
         MPI_Sendrecv(&my_pts[0], my_pts.size(), PARTICLE,
@@ -266,7 +266,7 @@ void move(particle_t &p, double size) {
 void move_particle_cross_processor(int num_proc) {
     for (int i = 0; i < num_proc; ++i) {
         int Num_Bins_Per_Proc = Num_Bins_Per_Proc_Side * Num_Bins_Per_Proc_Side;
-        vector < particle_t * > go(MAX_NUM_PT_PER_BIN * Num_Bins_Per_Proc);
+        vector<particle_t *> go(MAX_NUM_PT_PER_BIN * Num_Bins_Per_Proc);
         auto search = Map.find(i);
         if (search != Map.end()) {
             go = Map.at(i);
@@ -276,12 +276,34 @@ void move_particle_cross_processor(int num_proc) {
 
     for (int i = 0; i < num_proc; ++i) {
         int Num_Bins_Per_Proc = Num_Bins_Per_Proc_Side * Num_Bins_Per_Proc_Side;
-        vector < particle_t * > come(MAX_NUM_PT_PER_BIN * Num_Bins_Per_Proc);
+        vector<particle_t *> come(MAX_NUM_PT_PER_BIN * Num_Bins_Per_Proc);
         MPI_Status status;
         MPI_Recv(&come[0], come.size(), PARTICLE, i, 0, MPI_COMM_WORLD, &status);
         for (auto &pt : come) {
             put_particle_to_bin(*pt);
         }
+    }
+}
+
+// Collect all particle structs from my inner bins.
+void collect_pts_from_all_my_bins(vector<particle_t> &dest_vec) {
+    int N = Num_Bins_Per_Proc_Side + 2;
+    for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
+        for (int j = 1; j <= Num_Bins_Per_Proc_Side; ++j) {
+            auto &bin = Bins[i * N + j];
+            for (auto &pt : bin) {
+                dest_vec.push_back(*pt);
+            }
+        }
+    }
+}
+
+// Write particle structs in the source array to correct slots in the destination array
+void write_pts_to_dest_arr(particle_t* src_pts_arr, int N_src, particle_t *dest_pts_arr) {
+    for (int i = 0; i < N_src; ++i) {
+        particle_t& pt = src_pts_arr[i];
+        uint64_t idx = pt.id - 1;
+        dest_pts_arr[idx] = pt;
     }
 }
 
@@ -359,36 +381,37 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
 /* Write this function such that at the end of it, the master (rank == 0)
  * processor has an in-order view of all particles. That is, the array
  * parts is complete and sorted by particle id. */
-// TODO: maybe use Isend/Irecv here?
+// TODO: maybe try Isend/Irecv
 void gather_for_save(particle_t *parts, int num_parts, double size, int rank, int num_proc) {
-    // Skip "useless" processors
     if (!is_useful_rank(rank)) return;
 
-    int N = Num_Bins_Per_Proc_Side + 2;
+    // For collecting particles from my bins
+    vector<particle_t> my_pts;
+
     // Collect all the particles in the inner bins
-    vector < particle_t * > all_pts_vec;
-    for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
-        for (int j = 1; j <= Num_Bins_Per_Proc_Side; ++j) {
-            unordered_set < particle_t * > &bin = Bins[i * N + j];
-            all_pts_vec.insert(all_pts_vec.end(), bin.begin(), bin.end());
-        }
-    }
-    // Sort all my particles by ID
-    sort(all_pts_vec.begin(), all_pts_vec.end(), [](const particle_t *lhs, const particle_t *rhs) {
-        return (lhs->id) < (rhs->id);
-    });
-    // If not master, send sorted particles to master
-    if (rank != 0) {
-        MPI_Send(&all_pts_vec[0], all_pts_vec.size(), PARTICLE, 0,
-                1234, MPI_COMM_WORLD);
-    } else {  // If is master
-        // Receive from all *useful* processors
+    collect_pts_from_all_my_bins(my_pts);
+
+    if (rank != 0) {  // If not master, send my particles to master
+        MPI_Send(&my_pts[0], my_pts.size(), PARTICLE, 0,
+                 1234, MPI_COMM_WORLD);
+    } else {  // If master
+        // Write master particles to correct slots
+        write_pts_to_dest_arr(my_pts.data(), my_pts.size(), parts);
+
+        // Create buffer for receiving particles
+        int max_num_pts_per_proc = MAX_NUM_PT_PER_BIN * Num_Bins_Per_Proc_Side * Num_Bins_Per_Proc_Side;
+        vector<particle_t> buffer(max_num_pts_per_proc);
+
+        // Receive particles from all other useful processors
         int N_useful_proc = Num_Proc_Per_Side * Num_Proc_Per_Side;
-        for (int other_rank = 1; other_rank < N_useful_proc; ++other_rank) {
-            vector<particle_t*> recv_pts();
+        for (int r = 1; r < N_useful_proc; ++r) {
             MPI_Status status;
-            MPI_Recv(&come[0], come.size(), PARTICLE, i, 0, MPI_COMM_WORLD, &status);
-            // Merge all received particles into mine
+            MPI_Recv(&buffer[0], max_num_pts_per_proc, PARTICLE, r,
+                     MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+            int recv_cnt;
+            MPI_Get_count(&status, PARTICLE, &recv_cnt);
+            // Write received particles to correct slots
+            write_pts_to_dest_arr(buffer.data(), recv_cnt, parts);
         }
     }
 }
