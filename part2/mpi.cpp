@@ -65,10 +65,10 @@ inline int which_bin(const particle_t &pt) {
     int row_idx = floor((pt.x - My_Min_X) / BIN_SIZE) + 1;
     int col_idx = floor((pt.y - My_Min_Y) / BIN_SIZE) + 1;
     // DEBUG
-    assert(row_idx >= 0);
-    assert(row_idx < Num_Bins_Per_Proc_Side + 2);
-    assert(col_idx >= 0);
-    assert(col_idx < Num_Bins_Per_Proc_Side + 2);
+//    assert(row_idx >= 0);
+//    assert(row_idx < Num_Bins_Per_Proc_Side + 2);
+//    assert(col_idx >= 0);
+//    assert(col_idx < Num_Bins_Per_Proc_Side + 2);
     return BIN_IDX(row_idx, col_idx);
 }
 
@@ -350,10 +350,10 @@ void move_particle_cross_processor(int my_rank, particle_t *parts) {
         // Clear all sent particles
         to_send.clear();
         // DEBUG: make sure all received particles are mine
-        for (auto& pt : to_recv) {
-            assert(calculate_particle_rank(pt) == my_rank);
-            assert(!is_bin_idx_in_outer(which_bin(pt)));
-        }
+//        for (auto& pt : to_recv) {
+//            assert(calculate_particle_rank(pt) == my_rank);
+//            assert(!is_bin_idx_in_outer(which_bin(pt)));
+//        }
         // Put all received particles to the right bins
         for (int i = 0; i < recv_cnt; ++i) {
             particle_t pt_cpy = to_recv[i];
@@ -411,7 +411,7 @@ void init_simulation(particle_t *parts, int num_parts, double size, int rank, in
         // If particle belongs to this processor
         if (calculate_particle_rank(pt) == rank) {
             // DEBUG
-            assert(!is_bin_idx_in_outer(which_bin(pt)));
+//            assert(!is_bin_idx_in_outer(which_bin(pt)));
             put_one_pt_to_bin(pt);
         }
     }
@@ -460,8 +460,6 @@ void init_simulation(particle_t *parts, int num_parts, double size, int rank, in
 }
 
 void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, int num_proc) {
-    assert(rank == My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx);
-
     if (is_useful_rank(rank)) {
         // Communicate with horizontal and vertical neighbor processors
         communicate_with_non_diagonal_neighbors(TOP, parts);
@@ -526,11 +524,11 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
         }
     }
 
-//    MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
+    MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
 
     move_particle_cross_processor(rank, parts);
 
-//    MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
+    MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
 
 //    if (rank == 0)  // DEBUG
 //        cout << "done one step!" << endl;
