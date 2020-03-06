@@ -18,7 +18,7 @@ using namespace std;
 int Num_Proc_Per_Side;  // Number of processors per side
 int Num_Useful_Proc;  // Total number of processors involved in computation
 double Proc_Size;  // Size of a processor's side
-#define Num_Bins_Per_Proc_Side 10  // TODO: change to dynamic and scale with proc size
+int Num_Bins_Per_Proc_Side;  // Number of bins per processor side (scale with processor side)
 double BIN_SIZE;  // Length of a bin's side
 int Max_Num_Pts_Per_Proc;  // Maximum number of particles per processor
 
@@ -265,6 +265,15 @@ inline void apply_force(particle_t &particle, particle_t &neighbor) {
 
 // For a particle, make it interact with all particles in a neighboring bin.
 inline void interact_with_neighbor_bin(particle_t *pt, int neiRow, int neiCol) {
+    if (neiRow == 0 && get_neighbor_proc_rank(TOP) == -1)
+        return;
+    if (neiRow == Num_Bins_Per_Proc_Side + 1 && get_neighbor_proc_rank(BOTTOM) == -1)
+        return;
+    if (neiCol == 0 && get_neighbor_proc_rank(LEFT) == -1)
+        return;
+    if (neiCol == Num_Bins_Per_Proc_Side + 1 && get_neighbor_proc_rank(RIGHT) == -1)
+        return;
+
     // Interact with all particles in a valid neighbor
     for (auto &neiPts : Bins[BIN_IDX(neiRow, neiCol)]) {
         apply_force(*pt, *neiPts);
@@ -326,6 +335,7 @@ void move_particle_cross_processor(int my_rank, particle_t *parts) {
         if (proc == my_rank) continue;
         // Prepare all cross-processor particles to send
         vector <particle_t> &to_send = Outgoing_Pts_Buffer[proc];
+        if (to_send.size() == 0) continue;
         // Prepare buffer to receive cross-processor particles
         vector <particle_t> &to_recv = Incoming_Pts_Buffer[proc];
         // Two-way communication to avoid deadlock
@@ -367,7 +377,7 @@ void init_simulation(particle_t *parts, int num_parts, double size, int rank, in
     Num_Useful_Proc = Num_Proc_Per_Side * Num_Proc_Per_Side;
     Proc_Size = size / Num_Proc_Per_Side;
     // Calculate global bin & particle constants
-//    Num_Bins_Per_Proc_Side = ceil(Proc_Size / BIN_SIZE);
+    Num_Bins_Per_Proc_Side = int(Proc_Size / 0.01);
     BIN_SIZE = Proc_Size / Num_Bins_Per_Proc_Side;
     int total_bins_per_proc = Num_Bins_Per_Proc_Side * Num_Bins_Per_Proc_Side;
     Max_Num_Pts_Per_Proc = MAX_NUM_PTS_PER_BIN * total_bins_per_proc;
@@ -453,52 +463,17 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
     assert(rank == My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx);
 
     if (is_useful_rank(rank)) {
-
-        // DEBUG
-        for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
-            for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
-                for (auto &pt : Bins[BIN_IDX(r, c)]) {
-                    if (calculate_particle_rank(*pt) != rank || is_bin_idx_in_outer(which_bin(*pt)))
-                        cout << "Rank " << rank << ": corrupted inner bins at beginning" << endl;
-                }
-            }
-        }
-//
-//        if (rank == 0)
-//            cout << "communicate with non-diagonal neighbors..." << endl;
-
         // Communicate with horizontal and vertical neighbor processors
         communicate_with_non_diagonal_neighbors(TOP, parts);
         communicate_with_non_diagonal_neighbors(BOTTOM, parts);
         communicate_with_non_diagonal_neighbors(LEFT, parts);
         communicate_with_non_diagonal_neighbors(RIGHT, parts);
-
-//        if (rank == 0)  // DEBUG
-//            cout << "communicate with diagonal neighbors..." << endl;
-
         // Communicate with diagonal processors
         communicate_with_diagonal_neighbors(TOP_LEFT, parts);
         communicate_with_diagonal_neighbors(TOP_RIGHT, parts);
         communicate_with_diagonal_neighbors(BOTTOM_LEFT, parts);
         communicate_with_diagonal_neighbors(BOTTOM_RIGHT, parts);
 
-        // DEBUG
-        for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
-            for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
-                for (auto &pt : Bins[BIN_IDX(r, c)]) {
-                    if (calculate_particle_rank(*pt) != rank || is_bin_idx_in_outer(which_bin(*pt)))
-                        cout << "Rank " << rank << ": corrupted inner bins after communication" << endl;
-                }
-            }
-        }
-//
-//        if (rank == 0)
-//            cout << "apply_force start..." << endl;
-    }
-
-    MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
-
-    if (is_useful_rank(rank)) {
         // Apply forces in each bin
         for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
             for (int j = 1; j <= Num_Bins_Per_Proc_Side; ++j) {
@@ -509,134 +484,56 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
 
     MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
 
-    // DEBUG
-//    if (rank == 0)
-//        cout << "Pass Barrier!" << endl;
-
     if (is_useful_rank(rank)) {
-
-        // DEBUG
-        if (rank == 0)
-            cout << "move() start" << endl;
+        // Particles that jump to other bins within this processor
+        vector<particle_t*> local_jumping_pts;
+        // Apply force to all particles in inner bins
         for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
             for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
-                for (auto &pt : Bins[BIN_IDX(r, c)]) {  // FIXME: invalid read
-                    assert(calculate_particle_rank(*pt) == My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx);
-                    assert(!is_bin_idx_in_outer(which_bin(*pt)));
-                    if (calculate_particle_rank(*pt) != rank || is_bin_idx_in_outer(which_bin(*pt))) {
-                        cout << "Rank " << rank << ": Fucked before moving..." << endl;
-                    }
-                }
-            }
-        }
-
-        // Iterate over inner bins that belong to this processor
-//        for (int i = 0; i < num_parts; i++) {
-//            particle_t& pt = parts[i];
-//            if (calculate_particle_rank(pt) == rank) {
-//                move(pt, size);
-//            }
-//        }
-
-
-        vector<particle_t*> local_changing_pts;
-
-        for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
-            for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
-
-//                cout << "Rank " << rank << " moving bin " << BIN_IDX(r, c) << " of size " << Bins[BIN_IDX(r, c)].size() << endl;
-
-                unordered_set<particle_t*>& bin = Bins[BIN_IDX(r, c)];
+                int bin_idx = BIN_IDX(r, c);
+                unordered_set<particle_t*>& bin = Bins[bin_idx];
                 auto itr = bin.begin();
                 while (itr != bin.end()) {
                     particle_t* pt_ptr = *itr;
                     particle_t pt_struct = *pt_ptr;
 
-//                    cout << "(1) Rank " << rank << " | bin " << BIN_IDX(r, c) << " | particle " << pt_struct.id << endl;
-
-                    int oldRank = calculate_particle_rank(pt_struct);
-                    int oldIdx = which_bin(pt_struct);
-
-                    // DEBUG
-                    assert(oldIdx == BIN_IDX(r, c));
-                    assert(oldRank == rank);
-                    assert(!is_bin_idx_in_outer(oldIdx));
-
+                    // Move each particle
                     move_single_particle(pt_struct, size);
 
-                    // Put the particle into new places
                     int newRank = calculate_particle_rank(pt_struct);
                     int newIdx = which_bin(pt_struct);
-
-//                    cout << "(2) Rank " << rank << " | bin " << BIN_IDX(r, c) << " | particle " << pt_struct.id << endl;
-
                     // If the particle stays in the same bin
-                    if (newRank == oldRank && newIdx == oldIdx) {
+                    if (newRank == rank && newIdx == bin_idx) {
                         ++itr;
                     } else {  // If the particle changes bins
-//                        cout << "erasing" << endl;
-                        itr = Bins[oldIdx].erase(itr);
-//                        cout << "erased" << endl;
+                        itr = Bins[bin_idx].erase(itr);
                         // If particle is bound to another processor
-                        if (newRank != oldRank) {
+                        if (newRank != rank) {
                             // Push copy of particle to buffer
                             Outgoing_Pts_Buffer[newRank].push_back(pt_struct);
                         } else {  // Stays in the same processor
-                            // DEBUG
-                            assert(!is_bin_idx_in_outer(oldIdx));
                             // Insert into another local bin
-                            local_changing_pts.push_back(pt_ptr);
-//                            Bins[newIdx].insert(pt_ptr);
+                            local_jumping_pts.push_back(pt_ptr);
                         }
                     }
                 }
-
-//                cout << "Rank " << rank << " moved bin " << BIN_IDX(r, c) << endl;
             }
         }
 
-        for (auto& pt_ptr : local_changing_pts) {
+        // Insert local particles to the right bins
+        for (auto& pt_ptr : local_jumping_pts) {
             put_one_pt_to_bin(*pt_ptr);
-        }
-
-        // DEBUG
-        for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
-            for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
-                for (auto &pt : Bins[BIN_IDX(r, c)]) {  // FIXME: invalid read
-                    assert(calculate_particle_rank(*pt) == My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx);
-                    assert(!is_bin_idx_in_outer(which_bin(*pt)));
-                    if (calculate_particle_rank(*pt) != rank || is_bin_idx_in_outer(which_bin(*pt))) {
-                        cout << "Rank " << rank << ": Fucked after moving..." << endl;
-                    }
-                }
-            }
         }
     }
 
-    MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
-
-    // DEBUG
-    if (rank == 0)
-        cout << "move_particle_cross_processor() start" << endl;
+//    MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
 
     move_particle_cross_processor(rank, parts);
 
-    if (is_useful_rank(rank)) {  // DEBUG
-        for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
-            for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
-                for (auto &pt : Bins[BIN_IDX(r, c)]) {  // FIXME: invalid read
-                    if (calculate_particle_rank(*pt) != rank) {
-                        cout << "Rank " << rank << ": Screwed after cross processor..." << endl;
-                    }
-                }
-            }
-        }
-    }
+//    MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
 
-    MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
-
-    if (rank == 0)  // DEBUG
-        cout << "done one step!" << endl;
+//    if (rank == 0)  // DEBUG
+//        cout << "done one step!" << endl;
 }
 
 /* Write this function such that at the end of it, the master (rank == 0)
@@ -645,6 +542,7 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
 // NOTE: Performance isn't critical here as this function is only called when outputting (-o)
 void gather_for_save(particle_t *parts, int num_parts, double size, int rank, int num_proc) {
     if (!is_useful_rank(rank)) return;
+    int num_parts_received = 0;
 
     // Collect all the particles in my inner bins
     vector <particle_t> my_pts;
@@ -656,6 +554,7 @@ void gather_for_save(particle_t *parts, int num_parts, double size, int rank, in
     } else {  // If master
         // Write master particles to correct slots
         copy_pts_to_dest_arr(my_pts, my_pts.size(), parts);
+        num_parts_received += my_pts.size();
 
         // Create buffer for receiving particles
         vector <particle_t> buffer(Max_Num_Pts_Per_Proc);
@@ -669,7 +568,10 @@ void gather_for_save(particle_t *parts, int num_parts, double size, int rank, in
             MPI_Get_count(&status, PARTICLE, &recv_cnt);
             // Write received particles to correct slots
             copy_pts_to_dest_arr(buffer, recv_cnt, parts);
+            num_parts_received += recv_cnt;
         }
+
+        assert(num_parts_received == num_parts);
     }
     // DEBUG
 //    if (rank == 0)
