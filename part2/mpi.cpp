@@ -4,7 +4,6 @@
 #include <cmath>
 #include <unordered_set>
 #include <vector>
-#include <unordered_map>
 #include <assert.h>
 
 using namespace std;
@@ -46,12 +45,12 @@ vector <particle_t> *Incoming_Pts_Buffer;
 
 //////////////////////////////////////// Helper Functions ////////////////////////////////////////
 
-//bool is_bin_idx_in_outer(int bin_idx) {   // DEBUG
-//    int row = bin_idx / (Num_Bins_Per_Proc_Side + 2);
-//    int col = bin_idx % (Num_Bins_Per_Proc_Side + 2);
-//    return row == 0 || row == Num_Bins_Per_Proc_Side + 1 ||
-//           col == 0 || col == Num_Bins_Per_Proc_Side + 1;
-//}
+bool is_bin_idx_in_outer(int bin_idx) {   // DEBUG
+    int row = bin_idx / (Num_Bins_Per_Proc_Side + 2);
+    int col = bin_idx % (Num_Bins_Per_Proc_Side + 2);
+    return row == 0 || row == Num_Bins_Per_Proc_Side + 1 ||
+           col == 0 || col == Num_Bins_Per_Proc_Side + 1;
+}
 
 // Calculate the rank that the input particle belongs to
 inline int calculate_particle_rank(const particle_t &pt) {
@@ -65,25 +64,24 @@ inline int calculate_particle_rank(const particle_t &pt) {
 inline int which_bin(const particle_t &pt) {
     int row_idx = floor((pt.x - My_Min_X) / BIN_SIZE) + 1;
     int col_idx = floor((pt.y - My_Min_Y) / BIN_SIZE) + 1;
+    // DEBUG
+    assert(row_idx >= 0);
+    assert(row_idx < Num_Bins_Per_Proc_Side + 2);
+    assert(col_idx >= 0);
+    assert(col_idx < Num_Bins_Per_Proc_Side + 2);
     return BIN_IDX(row_idx, col_idx);
 }
 
 // Insert the input particle to the correct bin
-inline void put_one_pt_addr_to_bin(particle_t &pt) {
-//    // DEBUG
-//    if (My_Row_Idx == 0 && My_Col_Idx == 0) {
-//        int bin_idx = which_bin(pt);
-//        if (is_bin_idx_in_outer(bin_idx))
-//            cout << "put pt addr into \"outer\" buffer bin " << endl;
-//    }
+inline void put_one_pt_to_bin(particle_t &pt) {
     int idx = which_bin(pt);
     Bins[idx].insert(&pt);
 }
 
 // Put a vector of particles into corresponding bins
-void put_pts_addr_to_bins(vector <particle_t> &pts, int num_pts) {
+void put_many_pts_to_bins(vector <particle_t> &pts, int num_pts) {
     for (int i = 0; i < num_pts; i++) {
-        put_one_pt_addr_to_bin(pts[i]);
+        put_one_pt_to_bin(pts[i]);
     }
 }
 
@@ -151,24 +149,12 @@ void copy_pts_from_halo_bins(Direction which_border, vector <particle_t> &pt_vec
         int row_idx = which_border == TOP ? 1 : Num_Bins_Per_Proc_Side;
         for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
             auto &bin = Bins[BIN_IDX(row_idx, i)];
-
-//            // DEBUG
-//            for (auto& pt : bin) {
-//                assert(!is_bin_idx_in_outer(which_bin(*pt)));
-//            }
-
             copy_and_add_pts_struct_from_bin_to_vec(bin, pt_vec);
         }
     } else if (which_border == LEFT || which_border == RIGHT) {
         int col_idx = which_border == LEFT ? 1 : Num_Bins_Per_Proc_Side;
         for (int i = 1; i <= Num_Bins_Per_Proc_Side; ++i) {
             auto &bin = Bins[BIN_IDX(i, col_idx)];
-
-//            // DEBUG
-//            for (auto& pt : bin) {
-//                assert(!is_bin_idx_in_outer(which_bin(*pt)));
-//            }
-
             copy_and_add_pts_struct_from_bin_to_vec(bin, pt_vec);
         }
     }
@@ -190,13 +176,6 @@ void communicate_with_non_diagonal_neighbors(Direction nei_dir, particle_t* part
         // Collect to-be-sent particles from their bins
         vector <particle_t> pt_vec;
         copy_pts_from_halo_bins(nei_dir, pt_vec);
-
-        // DEBUG
-//        for (auto& pt : pt_vec) {
-//            assert(calculate_particle_rank(pt) == My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx);
-//            assert(!is_bin_idx_in_outer(which_bin(pt)));  // FAILED!!!!!!!!!!!!!!!!!
-//        }
-
         // Get the receiving buffer
         vector <particle_t> &buffer = Recv_Buffers[nei_dir];
         // Send and receive
@@ -209,14 +188,7 @@ void communicate_with_non_diagonal_neighbors(Direction nei_dir, particle_t* part
         int recv_cnt;
         MPI_Get_count(&status, PARTICLE, &recv_cnt);
         // Fill received particles into right bins
-        put_pts_addr_to_bins(Recv_Buffers[nei_dir], recv_cnt);
-
-        // DEBUG
-//        for (int i = 0; i < recv_cnt; ++i) {
-//            particle_t& pt = buffer[i];
-//            assert(calculate_particle_rank(pt) == nei_rank);
-//            assert(is_bin_idx_in_outer(which_bin(pt)));  // FAILED!!!!!!!!!!!!!!!!!!!!!!!
-//        }
+        put_many_pts_to_bins(Recv_Buffers[nei_dir], recv_cnt);
     }
 }
 
@@ -247,8 +219,6 @@ inline int get_corner_bin_idx(Direction dir) {
 }
 
 // Communicate with diagonal processors
-
-
 void communicate_with_diagonal_neighbors(Direction nei_dir, particle_t* parts) {
     int nei_rank = get_neighbor_proc_rank(nei_dir);
     if (nei_rank != -1) {  // If the neighbor exists
@@ -257,22 +227,10 @@ void communicate_with_diagonal_neighbors(Direction nei_dir, particle_t* parts) {
         unordered_set < particle_t * > &my_bin = Bins[bin_idx];
         vector <particle_t> my_pts;
         copy_and_add_pts_struct_from_bin_to_vec(my_bin, my_pts);
-
-        // DEBUG
-//        for (auto& pt : my_pts) {
-//            assert(calculate_particle_rank(pt) == My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx);
-//            assert(!is_bin_idx_in_outer(which_bin(pt)));
-//        }
-
         // Get the receiving buffer
         vector <particle_t> &buffer = Recv_Buffers[nei_dir];
         MPI_Status status;
         // Send and receive
-        // DEBUG
-//        cout << "send size = " << my_pts.size() << endl;
-//        cout << "recv capacity = " << buffer.capacity() << endl;
-//        if (my_pts.size() >= buffer.capacity())
-//            cout << "FFFFFFFFFFFFFUUUUUUUUUUUUUUCCCCCCCCCCCCKKKKKKKKKKKK" << endl;
         MPI_Sendrecv(&my_pts[0], my_pts.size(), PARTICLE,
                      nei_rank, 5678,
                      &buffer[0], MAX_NUM_PTS_PER_BIN, PARTICLE,
@@ -281,21 +239,12 @@ void communicate_with_diagonal_neighbors(Direction nei_dir, particle_t* parts) {
         int recv_cnt;
         MPI_Get_count(&status, PARTICLE, &recv_cnt);
         // Fill received particles into right bins
-        put_pts_addr_to_bins(Recv_Buffers[nei_dir], recv_cnt);
-
-        // DEBUG
-//        for (int i = 0; i < recv_cnt; ++i) {
-//            particle_t& pt = buffer[i];
-//            assert(calculate_particle_rank(pt) == nei_rank);
-//            assert(is_bin_idx_in_outer(which_bin(pt)));
-//        }
+        put_many_pts_to_bins(Recv_Buffers[nei_dir], recv_cnt);
     }
 }
 
 // Apply the force from neighbor to particle
 inline void apply_force(particle_t &particle, particle_t &neighbor) {
-//    assert(calculate_particle_rank(particle) == My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx);
-
     // Calculate Distance
     double dx = neighbor.x - particle.x;
     double dy = neighbor.y - particle.y;
@@ -316,8 +265,6 @@ inline void apply_force(particle_t &particle, particle_t &neighbor) {
 
 // For a particle, make it interact with all particles in a neighboring bin.
 inline void interact_with_neighbor_bin(particle_t *pt, int neiRow, int neiCol) {
-//    assert(calculate_particle_rank(*pt) == My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx);
-
     // Interact with all particles in a valid neighbor
     for (auto &neiPts : Bins[BIN_IDX(neiRow, neiCol)]) {
         apply_force(*pt, *neiPts);
@@ -328,7 +275,6 @@ inline void interact_with_neighbor_bin(particle_t *pt, int neiRow, int neiCol) {
 inline void calculate_bin_forces(int row, int col) {
     // For each particle in the input bin
     for (auto &pt : Bins[BIN_IDX(row, col)]) {
-//        assert(calculate_particle_rank(*pt) == My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx);
         pt->ax = pt->ay = 0;
         // Interact with all valid neighboring bins
         interact_with_neighbor_bin(pt, row, col);          // Self
@@ -343,15 +289,7 @@ inline void calculate_bin_forces(int row, int col) {
     }
 }
 
-void move(particle_t &p, double size) {
-    // DEBUG
-//    assert(is_useful_rank(My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx));
-//    assert(calculate_particle_rank(p) == My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx);
-//    cout << "rank " << My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx << " in move()" << endl;
-
-    int oldIdx = which_bin(p);
-    int oldRank = calculate_particle_rank(p);
-
+void move_single_particle(particle_t& p, double size) {
     p.vx += p.ax * dt;
     p.vy += p.ay * dt;
     p.x += p.vx * dt;
@@ -368,24 +306,7 @@ void move(particle_t &p, double size) {
         p.vy = -p.vy;
     }
 
-    // DEBUG
-//    cout << "rank " << My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx << " deciding..." << endl;
-
-    // Put the particle into new places
-    int newRank = calculate_particle_rank(p);
-    if (newRank != oldRank) {  // If the particle jumps to a new processor
-        Outgoing_Pts_Buffer[newRank].push_back(p);  // Push copy of particle to buffer
-        Bins[oldIdx].erase(&p);
-    } else {  // If the particle stays in this processor
-        int newIdx = which_bin(p);
-        if (newIdx != oldIdx) {  // If the particle jumps to a different bin
-            Bins[newIdx].insert(&p);
-            Bins[oldIdx].erase(&p);  // FIXME
-        }
-    }
-
-    // DEBUG
-//    cout << "rank " << My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx << " decided" << endl;
+//    p.ax = p.ay = 0;  // Exhaust all acceleration
 }
 
 // Copy particle structs in the source vector to correct slots in the destination array
@@ -393,10 +314,6 @@ void copy_pts_to_dest_arr(const vector <particle_t> &src_pts_vec, int N_src,
                           particle_t *dest_pts_arr) {
     for (int i = 0; i < N_src; ++i) {
         particle_t pt_cpy = src_pts_vec[i];
-
-//        assert(calculate_particle_rank(pt_cpy) == My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx);
-
-
         uint64_t idx = pt_cpy.id - 1;
         dest_pts_arr[idx] = pt_cpy;
     }
@@ -423,15 +340,16 @@ void move_particle_cross_processor(int my_rank, particle_t *parts) {
         // Clear all sent particles
         to_send.clear();
         // DEBUG: make sure all received particles are mine
-//        for (auto& pt : to_recv) {
-//            assert(calculate_particle_rank(pt) == my_rank);
-//        }
+        for (auto& pt : to_recv) {
+            assert(calculate_particle_rank(pt) == my_rank);
+            assert(!is_bin_idx_in_outer(which_bin(pt)));
+        }
         // Put all received particles to the right bins
         for (int i = 0; i < recv_cnt; ++i) {
             particle_t pt_cpy = to_recv[i];
             uint64_t idx = pt_cpy.id - 1;
             parts[idx] = pt_cpy;
-            put_one_pt_addr_to_bin(parts[idx]);
+            put_one_pt_to_bin(parts[idx]);
         }
     }
 }
@@ -481,29 +399,10 @@ void init_simulation(particle_t *parts, int num_parts, double size, int rank, in
     for (int i = 0; i < num_parts; i++) {
         particle_t &pt = parts[i];
         // If particle belongs to this processor
-        if (calculate_particle_rank(pt) == rank) {  // rank same =!=> inner
+        if (calculate_particle_rank(pt) == rank) {
             // DEBUG
-//            assert(!is_bin_idx_in_outer(which_bin(pt)));
-//            if (is_bin_idx_in_outer(which_bin(pt))) {
-//                cout << ">>>>>>>>>>>>>> FUCK <<<<<<<<<<<<<" << endl;
-//                cout << "I'm " << rank << "/" << num_proc << endl;
-//                cout << "pt.x = " << pt.x << endl;
-//                cout << "pt.y = " << pt.y << endl;
-//                cout << "My_Row_Idx = " << My_Row_Idx << endl;
-//                cout << "My_Col_Idx = " << My_Col_Idx << endl;
-//                cout << "My_Min_X = " << My_Min_X << endl;
-//                cout << "My_Min_Y = " << My_Min_Y << endl;
-//                cout << "which_bin(pt) = " << which_bin(pt) << endl;
-//                cout << "is particle in outer bin? YES " << endl;
-//                int bin_idx = which_bin(pt);
-//                int row = bin_idx / (Num_Bins_Per_Proc_Side + 2);
-//                int col = bin_idx % (Num_Bins_Per_Proc_Side + 2);
-//                cout << "bin row = " << row << endl;
-//                cout << "bin col = " << col << endl;
-//                cout << "---------------------------------" << endl;
-//            }
-
-            put_one_pt_addr_to_bin(pt);
+            assert(!is_bin_idx_in_outer(which_bin(pt)));
+            put_one_pt_to_bin(pt);
         }
     }
 
@@ -551,17 +450,19 @@ void init_simulation(particle_t *parts, int num_parts, double size, int rank, in
 }
 
 void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, int num_proc) {
+    assert(rank == My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx);
+
     if (is_useful_rank(rank)) {
 
         // DEBUG
-//        for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
-//            for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
-//                for (auto &pt : Bins[BIN_IDX(r, c)]) {
-//                    if (calculate_particle_rank(*pt) != rank)
-//                        cout << "Rank " << rank << ": corrupted inner bins at beginning" << endl;
-//                }
-//            }
-//        }
+        for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
+            for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
+                for (auto &pt : Bins[BIN_IDX(r, c)]) {
+                    if (calculate_particle_rank(*pt) != rank || is_bin_idx_in_outer(which_bin(*pt)))
+                        cout << "Rank " << rank << ": corrupted inner bins at beginning" << endl;
+                }
+            }
+        }
 //
 //        if (rank == 0)
 //            cout << "communicate with non-diagonal neighbors..." << endl;
@@ -582,14 +483,14 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
         communicate_with_diagonal_neighbors(BOTTOM_RIGHT, parts);
 
         // DEBUG
-//        for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
-//            for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
-//                for (auto &pt : Bins[BIN_IDX(r, c)]) {
-//                    if (calculate_particle_rank(*pt) != rank)
-//                        cout << "Rank " << rank << ": corrupted inner bins after communication" << endl;
-//                }
-//            }
-//        }
+        for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
+            for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
+                for (auto &pt : Bins[BIN_IDX(r, c)]) {
+                    if (calculate_particle_rank(*pt) != rank || is_bin_idx_in_outer(which_bin(*pt)))
+                        cout << "Rank " << rank << ": corrupted inner bins after communication" << endl;
+                }
+            }
+        }
 //
 //        if (rank == 0)
 //            cout << "apply_force start..." << endl;
@@ -615,63 +516,127 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
     if (is_useful_rank(rank)) {
 
         // DEBUG
-//        if (rank == 0)
-//            cout << "move() start" << endl;
-//
-//        for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
-//            for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
-//                for (auto &pt : Bins[BIN_IDX(r, c)]) {  // FIXME: invalid read
-//                    if (calculate_particle_rank(*pt) != rank) {
-//                        cout << "Rank " << rank << ": Fucked before moving..." << endl;
-//                    }
-//                }
-//            }
-//        }
-
-        // Iterate over inner bins that belong to this processor
-        for (int i = 0; i < num_parts; i++) {
-            particle_t& pt = parts[i];
-            if (calculate_particle_rank(pt) == rank) {
-                move(pt, size);
+        if (rank == 0)
+            cout << "move() start" << endl;
+        for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
+            for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
+                for (auto &pt : Bins[BIN_IDX(r, c)]) {  // FIXME: invalid read
+                    assert(calculate_particle_rank(*pt) == My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx);
+                    assert(!is_bin_idx_in_outer(which_bin(*pt)));
+                    if (calculate_particle_rank(*pt) != rank || is_bin_idx_in_outer(which_bin(*pt))) {
+                        cout << "Rank " << rank << ": Fucked before moving..." << endl;
+                    }
+                }
             }
         }
 
-        // DEBUG
-//        for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
-//            for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
-//                for (auto &pt : Bins[BIN_IDX(r, c)]) {  // FIXME: invalid read
-//                    if (calculate_particle_rank(*pt) != rank) {
-//                        cout << "Rank " << rank << ": Fucked after moving..." << endl;
-//                    }
-//                }
+        // Iterate over inner bins that belong to this processor
+//        for (int i = 0; i < num_parts; i++) {
+//            particle_t& pt = parts[i];
+//            if (calculate_particle_rank(pt) == rank) {
+//                move(pt, size);
 //            }
 //        }
+
+
+        vector<particle_t*> local_changing_pts;
+
+        for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
+            for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
+
+//                cout << "Rank " << rank << " moving bin " << BIN_IDX(r, c) << " of size " << Bins[BIN_IDX(r, c)].size() << endl;
+
+                unordered_set<particle_t*>& bin = Bins[BIN_IDX(r, c)];
+                auto itr = bin.begin();
+                while (itr != bin.end()) {
+                    particle_t* pt_ptr = *itr;
+                    particle_t pt_struct = *pt_ptr;
+
+//                    cout << "(1) Rank " << rank << " | bin " << BIN_IDX(r, c) << " | particle " << pt_struct.id << endl;
+
+                    int oldRank = calculate_particle_rank(pt_struct);
+                    int oldIdx = which_bin(pt_struct);
+
+                    // DEBUG
+                    assert(oldIdx == BIN_IDX(r, c));
+                    assert(oldRank == rank);
+                    assert(!is_bin_idx_in_outer(oldIdx));
+
+                    move_single_particle(pt_struct, size);
+
+                    // Put the particle into new places
+                    int newRank = calculate_particle_rank(pt_struct);
+                    int newIdx = which_bin(pt_struct);
+
+//                    cout << "(2) Rank " << rank << " | bin " << BIN_IDX(r, c) << " | particle " << pt_struct.id << endl;
+
+                    // If the particle stays in the same bin
+                    if (newRank == oldRank && newIdx == oldIdx) {
+                        ++itr;
+                    } else {  // If the particle changes bins
+//                        cout << "erasing" << endl;
+                        itr = Bins[oldIdx].erase(itr);
+//                        cout << "erased" << endl;
+                        // If particle is bound to another processor
+                        if (newRank != oldRank) {
+                            // Push copy of particle to buffer
+                            Outgoing_Pts_Buffer[newRank].push_back(pt_struct);
+                        } else {  // Stays in the same processor
+                            // DEBUG
+                            assert(!is_bin_idx_in_outer(oldIdx));
+                            // Insert into another local bin
+                            local_changing_pts.push_back(pt_ptr);
+//                            Bins[newIdx].insert(pt_ptr);
+                        }
+                    }
+                }
+
+//                cout << "Rank " << rank << " moved bin " << BIN_IDX(r, c) << endl;
+            }
+        }
+
+        for (auto& pt_ptr : local_changing_pts) {
+            put_one_pt_to_bin(*pt_ptr);
+        }
+
+        // DEBUG
+        for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
+            for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
+                for (auto &pt : Bins[BIN_IDX(r, c)]) {  // FIXME: invalid read
+                    assert(calculate_particle_rank(*pt) == My_Row_Idx * Num_Proc_Per_Side + My_Col_Idx);
+                    assert(!is_bin_idx_in_outer(which_bin(*pt)));
+                    if (calculate_particle_rank(*pt) != rank || is_bin_idx_in_outer(which_bin(*pt))) {
+                        cout << "Rank " << rank << ": Fucked after moving..." << endl;
+                    }
+                }
+            }
+        }
     }
 
     MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
 
     // DEBUG
-//    if (rank == 0)
-//        cout << "move_particle_cross_processor() start" << endl;
+    if (rank == 0)
+        cout << "move_particle_cross_processor() start" << endl;
 
     move_particle_cross_processor(rank, parts);
 
-//    if (is_useful_rank(rank)) {  // DEBUG
-//        for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
-//            for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
-//                for (auto &pt : Bins[BIN_IDX(r, c)]) {  // FIXME: invalid read
-//                    if (calculate_particle_rank(*pt) != rank) {
-//                        cout << "Rank " << rank << ": Screwed after cross processor..." << endl;
-//                    }
-//                }
-//            }
-//        }
-//    }
+    if (is_useful_rank(rank)) {  // DEBUG
+        for (int r = 1; r <= Num_Bins_Per_Proc_Side; r++) {
+            for (int c = 1; c <= Num_Bins_Per_Proc_Side; c++) {
+                for (auto &pt : Bins[BIN_IDX(r, c)]) {  // FIXME: invalid read
+                    if (calculate_particle_rank(*pt) != rank) {
+                        cout << "Rank " << rank << ": Screwed after cross processor..." << endl;
+                    }
+                }
+            }
+        }
+    }
 
     MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
 
-//    if (rank == 0)  // DEBUG
-//        cout << "done one step!" << endl;
+    if (rank == 0)  // DEBUG
+        cout << "done one step!" << endl;
 }
 
 /* Write this function such that at the end of it, the master (rank == 0)
@@ -679,10 +644,6 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
  * parts is complete and sorted by particle id. */
 // NOTE: Performance isn't critical here as this function is only called when outputting (-o)
 void gather_for_save(particle_t *parts, int num_parts, double size, int rank, int num_proc) {
-// DEBUG
-//    if (rank == 0)
-//        cout << "gather for save() started!" << endl;
-
     if (!is_useful_rank(rank)) return;
 
     // Collect all the particles in my inner bins
