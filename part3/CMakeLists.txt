@@ -25,11 +25,8 @@ if (NOT "${CMAKE_C_COMPILER_ID}" STREQUAL "GNU")
             "module swap ${Prg-${CMAKE_C_COMPILER_ID}} PrgEnv-gnu")
 endif ()
 
-# add_executable(gpu main.cu gpu.cu common.h)
-# target_compile_features(gpu PRIVATE cxx_std_11)
-add_executable(gpu-rebinning-pointers main.cu gpu-rebinning-pointers.cu common.h)
-target_compile_features(gpu-rebinning-pointers PRIVATE cxx_std_11)
+add_executable(gpu main.cu gpu.cu common.h)
+target_compile_features(gpu PRIVATE cxx_std_11)
 
 # Copy the job scripts
 configure_file(job-gpu job-gpu COPYONLY)
-configure_file(job-gpu-rebinning-pointers job-gpu-rebinning-pointers COPYONLY)
