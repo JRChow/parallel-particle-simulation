@@ -1,10 +1,21 @@
 #include "common.h"
 #include <cuda.h>
 
+using namespace std;
+
 #define NUM_THREADS 256
 
-// Put any static global variables here that you will use throughout the simulation.
-int blks;
+////////////////////////////////////////// Global Variables //////////////////////////////////////////
+
+int blks;  // Number of blocks
+
+#define BIN_SIZE 0.02
+// Number of bins per side
+int BinCnt;
+// Matrix of sets containing particles
+vector<particle_t *> *Bins;  // <- Need to protect it against race conditions
+// TODO: change to cuda equivalent?
+//omp_lock_t *Locks;
 
 __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
     double dx = neighbor.x - particle.x;
