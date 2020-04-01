@@ -11,8 +11,6 @@ using namespace std;
 #define NUM_THREADS_PER_BLK 256  // Number of threads per block
 #define BIN_SIZE 0.02  // Length of bin side
 
-// Error checking wrapper macro
-#define gpuErrorCheck(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 // Indexing bin to retrieve particle
 #define IDX(bin_idx, pt_idx) bin_idx * MAX_PTS_PER_BIN + pt_idx
 
@@ -66,16 +64,6 @@ __device__ void interact_with_neighbor(particle_t* parts, int self_pt_idx,
     }
 }
 
-// Assert-style handler
-inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
-{
-    if (code != cudaSuccess)
-    {
-        fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
-        if (abort) exit(code);
-    }
-}
-
 /////////////////////////////////////////////////////// Kernels ///////////////////////////////////////////////////////
 
 // Set all bin sizes to 0
@@ -95,9 +83,6 @@ __global__ void rebinning(particle_t* parts, int num_parts,
     int pt_idx = threadIdx.x + blockIdx.x * blockDim.x;
     if (pt_idx >= num_parts)
         return;
-
-//    // Exhaust all acceleration to prepare for force calculation
-//    parts[pt_idx].ax = parts[pt_idx].ay = 0;
 
     // Determine which bin to put the particle
     particle_t& pt = parts[pt_idx];
@@ -180,29 +165,25 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     Num_Blocks_By_Bin = (Total_Num_Bins + NUM_THREADS_PER_BLK - 1) / NUM_THREADS_PER_BLK;
 
     // Allocate memory to bins
-    gpuErrorCheck( cudaMalloc(&Bins, Total_Num_Bins * MAX_PTS_PER_BIN * sizeof(int)) );
-    gpuErrorCheck( cudaMalloc(&Bin_Sizes, Total_Num_Bins * sizeof(int)) );
+    cudaMalloc(&Bins, Total_Num_Bins * MAX_PTS_PER_BIN * sizeof(int));
+    cudaMalloc(&Bin_Sizes, Total_Num_Bins * sizeof(int));
 }
 
 void simulate_one_step(particle_t* parts, int num_parts, double size) {
     // Clearing bins (each thread handles a bin)
     reset_bin_sizes<<<Num_Blocks_By_Bin, NUM_THREADS_PER_BLK>>>(Bin_Sizes, Total_Num_Bins);
-    gpuErrorCheck( cudaPeekAtLastError() );
-    gpuErrorCheck( cudaDeviceSynchronize() );
+    cudaDeviceSynchronize();
 
     // Assigning particles to bins (each thread handles a particle)
     rebinning<<<Num_Blocks_By_Pt, NUM_THREADS_PER_BLK>>>(parts, num_parts,
                                                          Num_Bins_Per_Side, Bins, Bin_Sizes);
-    gpuErrorCheck( cudaPeekAtLastError() );
-    gpuErrorCheck( cudaDeviceSynchronize() );
+    cudaDeviceSynchronize();
 
     // Compute interaction forces (each thread handles a bin)
     compute_forces_gpu<<<Num_Blocks_By_Bin, NUM_THREADS_PER_BLK>>>(parts, Bins, Bin_Sizes, Num_Bins_Per_Side);
-    gpuErrorCheck( cudaPeekAtLastError() );
-    gpuErrorCheck( cudaDeviceSynchronize() );
+    cudaDeviceSynchronize();
 
     // Move particles (each thread handles a particle)
     move_gpu<<<Num_Blocks_By_Pt, NUM_THREADS_PER_BLK>>>(parts, num_parts, size);
-    gpuErrorCheck( cudaPeekAtLastError() );
-    gpuErrorCheck( cudaDeviceSynchronize() );
+    cudaDeviceSynchronize();
 }
