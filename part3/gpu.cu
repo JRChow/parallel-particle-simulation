@@ -172,18 +172,11 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
 void simulate_one_step(particle_t* parts, int num_parts, double size) {
     // Clearing bins (each thread handles a bin)
     reset_bin_sizes<<<Num_Blocks_By_Bin, NUM_THREADS_PER_BLK>>>(Bin_Sizes, Total_Num_Bins);
-    cudaDeviceSynchronize();
-
     // Assigning particles to bins (each thread handles a particle)
     rebinning<<<Num_Blocks_By_Pt, NUM_THREADS_PER_BLK>>>(parts, num_parts,
                                                          Num_Bins_Per_Side, Bins, Bin_Sizes);
-    cudaDeviceSynchronize();
-
     // Compute interaction forces (each thread handles a bin)
     compute_forces_gpu<<<Num_Blocks_By_Bin, NUM_THREADS_PER_BLK>>>(parts, Bins, Bin_Sizes, Num_Bins_Per_Side);
-    cudaDeviceSynchronize();
-
     // Move particles (each thread handles a particle)
     move_gpu<<<Num_Blocks_By_Pt, NUM_THREADS_PER_BLK>>>(parts, num_parts, size);
-    cudaDeviceSynchronize();
 }
