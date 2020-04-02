@@ -1,0 +1,12 @@
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 1
+#SBATCH -p GPU-shared
+#SBATCH -t 00:30:00
+#SBATCH --gres=gpu:p100:1
+
+num_pts=( 1000 4000 16000 64000 256000 1024000 4096000 16384000 )
+for i in "${num_pts[@]}"
+do
+	./gpu -s 42 -n $i
+done
