@@ -9,7 +9,7 @@ using namespace std;
 
 #define MAX_PTS_PER_BIN 16   // Max capacity of each bin
 #define NUM_THREADS_PER_BLK 256  // Number of threads per block
-#define BIN_SIZE 0.02  // Length of bin side
+// #define BIN_SIZE 0.02  // Length of bin side
 
 // Indexing bin to retrieve particle
 #define IDX(bin_idx, pt_idx) bin_idx * MAX_PTS_PER_BIN + pt_idx
@@ -23,6 +23,8 @@ int Num_Blocks_By_Bin;  // Number of blocks (for bin iteration)
 
 int* Bins;  // Bins containing particle indices
 int* Bin_Sizes;  // Actual size of each bin
+int* neighbor_bins;
+int* neighbor_bin_sizes;
 
 /////////////////////////////////////////////////// Helper Functions ///////////////////////////////////////////////////
 
@@ -47,22 +49,22 @@ __device__ void apply_force(particle_t* particle, particle_t* neighbor) {
 }
 
 // For a particle, make it interact with all particles in a neighboring bin.
-__device__ void interact_with_neighbor(particle_t* parts, int self_pt_idx,
-                                       int* Bins, int* Bin_Sizes, int Num_Bins_Per_Side,
-                                       int nei_bin_row, int nei_bin_col) {
-    // Check if the neighbor is valid (within bound)
-    if (nei_bin_row < 0 || nei_bin_row >= Num_Bins_Per_Side ||
-        nei_bin_col < 0 || nei_bin_col >= Num_Bins_Per_Side)
-        return;
+// __device__ void interact_with_neighbor(particle_t* parts, int self_pt_idx,
+//                                        int* Bins, int* Bin_Sizes, int Num_Bins_Per_Side,
+//                                        int nei_bin_row, int nei_bin_col) {
+//     // Check if the neighbor is valid (within bound)
+//     if (nei_bin_row < 0 || nei_bin_row >= Num_Bins_Per_Side ||
+//         nei_bin_col < 0 || nei_bin_col >= Num_Bins_Per_Side)
+//         return;
 
-    // Interact with all particles in the neighbor bin
-    int bin_idx = nei_bin_row * Num_Bins_Per_Side + nei_bin_col;
-    int num_nei_pts = Bin_Sizes[bin_idx];
-    for (int i = 0; i < num_nei_pts; ++i) {
-        int nei_pt_idx = Bins[IDX(bin_idx, i)];
-        apply_force(&parts[self_pt_idx], &parts[nei_pt_idx]);
-    }
-}
+//     // Interact with all particles in the neighbor bin
+//     int bin_idx = nei_bin_row * Num_Bins_Per_Side + nei_bin_col;
+//     int num_nei_pts = Bin_Sizes[bin_idx];
+//     for (int i = 0; i < num_nei_pts; ++i) {
+//         int nei_pt_idx = Bins[IDX(bin_idx, i)];
+//         apply_force(&parts[self_pt_idx], &parts[nei_pt_idx]);
+//     }
+// }
 
 /////////////////////////////////////////////////////// Kernels ///////////////////////////////////////////////////////
 
@@ -86,8 +88,8 @@ __global__ void rebinning(particle_t* parts, int num_parts,
 
     // Determine which bin to put the particle
     particle_t& pt = parts[pt_idx];
-    const int bin_row = floor(pt.x / BIN_SIZE);
-    const int bin_col = floor(pt.y / BIN_SIZE);
+    const int bin_row = floor(pt.x / cutoff / 2.);
+    const int bin_col = floor(pt.y / cutoff / 2.);
     const int bin_idx = bin_row * Num_Bins_Per_Side + bin_col;
 
     // Increment bin size atomically
@@ -97,15 +99,20 @@ __global__ void rebinning(particle_t* parts, int num_parts,
 }
 
 // Calculate forces bin-by-bin
-__global__ void compute_forces_gpu(particle_t* parts, int* Bins, int* Bin_Sizes, int Num_Bins_Per_Side) {
+__global__ void compute_forces_gpu(particle_t* parts,
+                                   int* Bins,
+                                   int* Bin_Sizes,
+                                   int Num_Bins_Per_Side,
+                                   int* neighbor_bins,
+                                   int* neighbor_bin_sizes) {
     // Get thread/bin index
     int bin_idx = threadIdx.x + blockIdx.x * blockDim.x;
     if (bin_idx >= Num_Bins_Per_Side * Num_Bins_Per_Side)
         return;
 
-    // Calculate row index & column index of this bin
-    int row = bin_idx / Num_Bins_Per_Side;
-    int col = bin_idx % Num_Bins_Per_Side;
+    // // Calculate row index & column index of this bin
+    // int row = bin_idx / Num_Bins_Per_Side;
+    // int col = bin_idx % Num_Bins_Per_Side;
 
     // For each particle in this bin
     int my_pts_cnt = Bin_Sizes[bin_idx];
@@ -114,15 +121,22 @@ __global__ void compute_forces_gpu(particle_t* parts, int* Bins, int* Bin_Sizes,
         // Exhaust all acceleration of this particle
         parts[pt_idx].ax = parts[pt_idx].ay = 0;
         // Interact with all 9 valid neighbor bins
-        interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row    , col    );  // Self
-        interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row - 1, col    );  // Top
-        interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row + 1, col    );  // Bottom
-        interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row    , col - 1);  // Left
-        interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row    , col + 1);  // Right
-        interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row - 1, col - 1);  // Top left
-        interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row - 1, col + 1);  // Top right
-        interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row + 1, col - 1);  // Bottom left
-        interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row + 1, col + 1);  // Bottom right
+        // interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row    , col    );  // Self
+        // interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row - 1, col    );  // Top
+        // interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row + 1, col    );  // Bottom
+        // interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row    , col - 1);  // Left
+        // interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row    , col + 1);  // Right
+        // interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row - 1, col - 1);  // Top left
+        // interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row - 1, col + 1);  // Top right
+        // interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row + 1, col - 1);  // Bottom left
+        // interact_with_neighbor(parts, pt_idx, Bins, Bin_Sizes, Num_Bins_Per_Side, row + 1, col + 1);  // Bottom right
+
+        for (int p = 0; p < neighbor_bin_sizes[bin_idx]; p++) {
+            const int neighbor_idx = neighbor_bins[9 * bin_idx + p];
+            for (int q = 0; q < Bin_Sizes[neighbor_idx]; q++) {
+                apply_force(parts + Bins[IDX(bin_idx, i)], parts + Bins[IDX(neighbor_idx, q)]);
+            }
+        }
     }
 }
 
@@ -154,11 +168,61 @@ __global__ void move_gpu(particle_t* particles, int num_parts, double size) {
     }
 }
 
+__global__ void get_neighbor_bin_indexes(int d, int* neighbor_bins, int* neighbor_bin_sizes) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if (idx >= d * d)
+        return;
+    
+    int* neighbors = neighbor_bins + 9 * idx;
+    int* neighbor_sizes = neighbor_bin_sizes + idx;
+
+    neighbors[0] = idx;
+    *neighbor_sizes = 1;
+
+    if (idx % d != 0) {
+        if (idx > d) {
+            neighbors[*neighbor_sizes] = idx - d - 1;
+            (*neighbor_sizes)++;
+        }
+        neighbors[*neighbor_sizes] = idx - 1;
+        (*neighbor_sizes)++;
+
+        if (idx <= d * (d-1)) {
+            neighbors[*neighbor_sizes] = idx + d - 1;
+            (*neighbor_sizes)++;
+        }
+    }
+
+    if (idx % d != d-1) {
+        if (idx >= d - 1) {
+            neighbors[*neighbor_sizes] = idx - d + 1;
+            (*neighbor_sizes)++;
+        }
+        neighbors[*neighbor_sizes] = idx + 1;
+        (*neighbor_sizes)++;
+
+        if (idx < d * (d-1) - 1) {
+            neighbors[*neighbor_sizes] = idx + d + 1;
+            (*neighbor_sizes)++;
+        }
+    }
+
+    if (idx >= d) {
+        neighbors[*neighbor_sizes] = idx - d;
+        (*neighbor_sizes)++;
+    }
+
+    if (idx < d * (d-1)) {
+        neighbors[*neighbor_sizes] = idx + d;
+        (*neighbor_sizes)++;
+    }
+}
+
 //////////////////////////////////////////////////// Key Functions ////////////////////////////////////////////////////
 
 void init_simulation(particle_t* parts, int num_parts, double size) {
     // Calculate number of bins
-    Num_Bins_Per_Side = ceil(size / BIN_SIZE);
+    Num_Bins_Per_Side = ceil(size / cutoff / 2.);
     Total_Num_Bins = Num_Bins_Per_Side * Num_Bins_Per_Side;
     // Calculate number of blocks by particle and by bin (ceiling division)
     Num_Blocks_By_Pt = (num_parts + NUM_THREADS_PER_BLK - 1) / NUM_THREADS_PER_BLK;
@@ -167,6 +231,13 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     // Allocate memory to bins
     cudaMalloc(&Bins, Total_Num_Bins * MAX_PTS_PER_BIN * sizeof(int));
     cudaMalloc(&Bin_Sizes, Total_Num_Bins * sizeof(int));
+    cudaMalloc(&neighbor_bins, 9 * Total_Num_Bins * sizeof(int));
+    cudaMalloc(&neighbor_bin_sizes, Total_Num_Bins * sizeof(int));
+
+    get_neighbor_bin_indexes<<<Num_Blocks_By_Bin, NUM_THREADS_PER_BLK>>>(
+        Num_Bins_Per_Side,
+        neighbor_bins,
+        neighbor_bin_sizes);
 }
 
 void simulate_one_step(particle_t* parts, int num_parts, double size) {
@@ -176,7 +247,13 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
     rebinning<<<Num_Blocks_By_Pt, NUM_THREADS_PER_BLK>>>(parts, num_parts,
                                                          Num_Bins_Per_Side, Bins, Bin_Sizes);
     // Compute interaction forces (each thread handles a bin)
-    compute_forces_gpu<<<Num_Blocks_By_Bin, NUM_THREADS_PER_BLK>>>(parts, Bins, Bin_Sizes, Num_Bins_Per_Side);
+    compute_forces_gpu<<<Num_Blocks_By_Bin, NUM_THREADS_PER_BLK>>>(
+        parts,
+        Bins,
+        Bin_Sizes,
+        Num_Bins_Per_Side,
+        neighbor_bins,
+        neighbor_bin_sizes);
     // Move particles (each thread handles a particle)
     move_gpu<<<Num_Blocks_By_Pt, NUM_THREADS_PER_BLK>>>(parts, num_parts, size);
 }
