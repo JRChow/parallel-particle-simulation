@@ -88,8 +88,8 @@ __global__ void rebinning(particle_t* parts, int num_parts,
 
     // Determine which bin to put the particle
     particle_t& pt = parts[pt_idx];
-    const int bin_row = floor(pt.x / cutoff / 2.);
-    const int bin_col = floor(pt.y / cutoff / 2.);
+    const int bin_row = floor(pt.x / cutoff);
+    const int bin_col = floor(pt.y / cutoff);
     const int bin_idx = bin_row * Num_Bins_Per_Side + bin_col;
 
     // Increment bin size atomically
@@ -110,10 +110,6 @@ __global__ void compute_forces_gpu(particle_t* parts,
     if (bin_idx >= Num_Bins_Per_Side * Num_Bins_Per_Side)
         return;
 
-    // // Calculate row index & column index of this bin
-    // int row = bin_idx / Num_Bins_Per_Side;
-    // int col = bin_idx % Num_Bins_Per_Side;
-
     // For each particle in this bin
     int my_pts_cnt = Bin_Sizes[bin_idx];
     for (int i = 0; i < my_pts_cnt; ++i) {
@@ -133,8 +129,10 @@ __global__ void compute_forces_gpu(particle_t* parts,
 
         for (int p = 0; p < neighbor_bin_sizes[bin_idx]; p++) {
             const int neighbor_idx = neighbor_bins[9 * bin_idx + p];
-            for (int q = 0; q < Bin_Sizes[neighbor_idx]; q++) {
-                apply_force(parts + Bins[IDX(bin_idx, i)], parts + Bins[IDX(neighbor_idx, q)]);
+            for (int m = 0; m < my_pts_cnt; m++) {
+                for (int q = 0; q < Bin_Sizes[neighbor_idx]; q++) {
+                    apply_force(parts + Bins[IDX(bin_idx, m)], parts + Bins[IDX(neighbor_idx, q)]);
+                }
             }
         }
     }
@@ -222,7 +220,7 @@ __global__ void get_neighbor_bin_indexes(int d, int* neighbor_bins, int* neighbo
 
 void init_simulation(particle_t* parts, int num_parts, double size) {
     // Calculate number of bins
-    Num_Bins_Per_Side = ceil(size / cutoff / 2.);
+    Num_Bins_Per_Side = ceil(size / cutoff);
     Total_Num_Bins = Num_Bins_Per_Side * Num_Bins_Per_Side;
     // Calculate number of blocks by particle and by bin (ceiling division)
     Num_Blocks_By_Pt = (num_parts + NUM_THREADS_PER_BLK - 1) / NUM_THREADS_PER_BLK;
