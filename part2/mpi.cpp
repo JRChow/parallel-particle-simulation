@@ -29,7 +29,7 @@ int MaxNumPtsPerProc;  // Maximum number of particles per processor
 // Processor-specific variables
 double MyMinX;  // Minimum X value of this processor
 
-// The bins containing all the relevant particles (plus padding)
+// The bins containing the indices of all the relevant particles (plus padding)
 unordered_set<int> *Bins;
 
 enum Direction {
@@ -61,7 +61,7 @@ inline int which_bin(const particle_t &pt) {
 // Insert the input particle to the correct bin
 inline void put_one_pt_to_bin(const particle_t &pt) {
     int idx = which_bin(pt);
-    Bins[idx].insert(pt.id);
+    Bins[idx].insert(pt.id - 1);  // Particle ID is 1-based
 }
 
 // Get the rank of a neighbor processor (if valid)
@@ -84,8 +84,8 @@ inline int get_neighbor_proc_rank(Direction nei_dir, int my_rank, int num_proc) 
 void copy_add_pts_from_bin_to_vec(const unordered_set<int> &bin,
                                   particle_t *parts,
                                   vector<particle_t> &vec) {
-    for (const auto &pt_id : bin) {
-        vec.push_back(parts[pt_id]);  // Push copy of particle struct to vector
+    for (const auto &pt_idx : bin) {
+        vec.push_back(parts[pt_idx]);  // Push copy of particle struct to vector
     }
 }
 
@@ -113,8 +113,8 @@ void copy_pts_from_all_my_bins(particle_t* parts, vector<particle_t> &dest_vec) 
 void distribute_received_particles(vector<particle_t> recv_buffer, int recv_cnt, particle_t* parts) {
     for (int i = 0; i < recv_cnt; i++) {
         particle_t &pt = recv_buffer[i];
-        uint64_t arr_idx = pt.id - 1;
-        parts[arr_idx] = pt;
+        auto pt_idx = pt.id - 1;  // ID is 1-indexed
+        parts[pt_idx] = pt;
         put_one_pt_to_bin(pt);
     }
 }
@@ -163,27 +163,27 @@ inline void apply_force(particle_t &particle, particle_t &neighbor) {
 }
 
 // For a particle, make it interact with all particles in a neighboring bin.
-inline void interact_with_neighbor_bin(particle_t* parts, int pt_id, int nei_row, int nei_col) {
+inline void interact_with_neighbor_bin(particle_t* parts, int pt_idx, int nei_row, int nei_col) {
     // Interact with all particles in a valid neighbor bin
-    for (auto &nei_id : Bins[BIN_IDX(nei_row, nei_col)]) {
-        apply_force(parts[pt_id], parts[nei_id]);
+    for (auto &nei_idx : Bins[BIN_IDX(nei_row, nei_col)]) {
+        apply_force(parts[pt_idx], parts[nei_idx]);
     }
 }
 
 // Helper function to calculate 9-by-9 bins
 inline void calculate_bin_forces(particle_t *parts, int row, int col) {
     // For each particle in the input bin
-    for (auto &pt_id : Bins[BIN_IDX(row, col)]) {
+    for (auto &pt_idx : Bins[BIN_IDX(row, col)]) {
         // Interact with all valid neighboring bins
-        interact_with_neighbor_bin(parts, pt_id, row, col);  // Self
-        interact_with_neighbor_bin(parts, pt_id, row - 1, col);  // Top
-        interact_with_neighbor_bin(parts, pt_id, row + 1, col);  // Bottom
-        interact_with_neighbor_bin(parts, pt_id, row, col - 1);  // Left
-        interact_with_neighbor_bin(parts, pt_id, row, col + 1);  // Right
-        interact_with_neighbor_bin(parts, pt_id, row - 1, col - 1);  // Top left
-        interact_with_neighbor_bin(parts, pt_id, row - 1, col + 1);  // Top right
-        interact_with_neighbor_bin(parts, pt_id, row + 1, col - 1);  // Bottom left
-        interact_with_neighbor_bin(parts, pt_id, row + 1, col + 1);  // Bottom right
+        interact_with_neighbor_bin(parts, pt_idx, row, col);  // Self
+        interact_with_neighbor_bin(parts, pt_idx, row - 1, col);  // Top
+        interact_with_neighbor_bin(parts, pt_idx, row + 1, col);  // Bottom
+        interact_with_neighbor_bin(parts, pt_idx, row, col - 1);  // Left
+        interact_with_neighbor_bin(parts, pt_idx, row, col + 1);  // Right
+        interact_with_neighbor_bin(parts, pt_idx, row - 1, col - 1);  // Top left
+        interact_with_neighbor_bin(parts, pt_idx, row - 1, col + 1);  // Top right
+        interact_with_neighbor_bin(parts, pt_idx, row + 1, col - 1);  // Bottom left
+        interact_with_neighbor_bin(parts, pt_idx, row + 1, col + 1);  // Bottom right
     }
 }
 
