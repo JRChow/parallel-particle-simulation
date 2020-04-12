@@ -301,7 +301,7 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
             auto itr = bin.begin();
             while (itr != bin.end()) {
                 int pt_idx = *itr;
-                particle_t pt_struct = parts[pt_idx];
+                particle_t& pt_struct = parts[pt_idx];
                 // Move the particle
                 move_one_particle(pt_struct, size);
                 int new_rank = get_particle_rank(pt_struct);
