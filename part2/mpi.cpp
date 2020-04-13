@@ -1,6 +1,5 @@
 #include "common.h"
 #include <mpi.h>
-#include <iostream>
 #include <cmath>
 #include <unordered_set>
 #include <vector>
@@ -311,6 +310,8 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
 
     MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
 
+    // Buffer in-processor particles to avoid moving them twice
+    vector<int> local_jumping_pts;
     // Apply forces to all particles in inner bins
     for (int r = 1; r <= NumBinRowsPerProc; ++r) {
         for (int c = 0; c < NumBinCols; ++c) {
@@ -335,12 +336,21 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
                         // Push copy of particle to outgoing buffer
                         OutgoingPtsBuffer[new_rank].push_back(pt_struct);
                     } else {  // If particle should stay in same processor
-                        // Insert into another local bin
-                        put_one_pt_to_bin(pt_struct);
+                        /* Buffer the particles and move them later.
+                         * NOTE: Do NOT move them now because we might move particles
+                         * to a bin that we visits later in the iteration, resulting
+                         * in moving the particle twice. This might cause correctness
+                         * check to fail because of floating-point precision problems. */
+                        local_jumping_pts.push_back(pt_idx);
                     }
-                }
-            }
-        }
+                }  // If particle needs to be moved
+            }  // Iterate over particles in bin
+        }  // Bin column iteration
+    }  // Bin row iteration
+
+    // Move in-processor particles to their new bins.
+    for (int pt_idx : local_jumping_pts) {
+        put_one_pt_to_bin(parts[pt_idx]);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
@@ -375,8 +385,8 @@ void gather_for_save(particle_t *parts, int num_parts, double size, int rank, in
         // Receive particles from all other useful processors
         for (int p = 1; p < num_proc; ++p) {
             MPI_Status status;
-            MPI_Recv(&buffer[0], MaxNumPtsPerProc, PARTICLE, p,
-                     MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+            MPI_Recv(&buffer[0], MaxNumPtsPerProc, PARTICLE,
+                     p, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
             int recv_cnt;
             MPI_Get_count(&status, PARTICLE, &recv_cnt);
             // Write received particles to correct slots
