@@ -167,8 +167,7 @@ inline void apply_force(particle_t &particle, particle_t &neighbor) {
 }
 
 // For a particle, make it interact with all particles in a neighboring bin.
-inline void interact_with_neighbor_bin(particle_t *parts, int pt_idx, int rank, int num_proc,
-                                       int nei_row, int nei_col) {
+inline void interact_with_neighbor_bin(particle_t *parts, int pt_idx, int nei_row, int nei_col) {
     // Do nothing if neighbor bin does not exist (+2 because of padding)
     if (nei_row < 0 || nei_row >= NumBinRowsPerProc + 2 ||
         nei_col < 0 || nei_col >= NumBinCols)
@@ -181,19 +180,19 @@ inline void interact_with_neighbor_bin(particle_t *parts, int pt_idx, int rank, 
 }
 
 // Helper function to calculate 9-by-9 bins
-inline void calculate_bin_forces(particle_t *parts, int rank, int num_proc, int row, int col) {
+inline void calculate_bin_forces(particle_t *parts, int row, int col) {
     // For each particle in the input bin
     for (auto &pt_idx : Bins[BIN_IDX(row, col)]) {
         // Interact with all valid neighboring bins
-        interact_with_neighbor_bin(parts, pt_idx, rank, num_proc, row, col);  // Self
-        interact_with_neighbor_bin(parts, pt_idx, rank, num_proc, row - 1, col);  // Top
-        interact_with_neighbor_bin(parts, pt_idx, rank, num_proc, row + 1, col);  // Bottom
-        interact_with_neighbor_bin(parts, pt_idx, rank, num_proc, row, col - 1);  // Left
-        interact_with_neighbor_bin(parts, pt_idx, rank, num_proc, row, col + 1);  // Right
-        interact_with_neighbor_bin(parts, pt_idx, rank, num_proc, row - 1, col - 1);  // Top left
-        interact_with_neighbor_bin(parts, pt_idx, rank, num_proc, row - 1, col + 1);  // Top right
-        interact_with_neighbor_bin(parts, pt_idx, rank, num_proc, row + 1, col - 1);  // Bottom left
-        interact_with_neighbor_bin(parts, pt_idx, rank, num_proc, row + 1, col + 1);  // Bottom right
+        interact_with_neighbor_bin(parts, pt_idx, row, col);  // Self
+        interact_with_neighbor_bin(parts, pt_idx, row - 1, col);  // Top
+        interact_with_neighbor_bin(parts, pt_idx, row + 1, col);  // Bottom
+        interact_with_neighbor_bin(parts, pt_idx, row, col - 1);  // Left
+        interact_with_neighbor_bin(parts, pt_idx, row, col + 1);  // Right
+        interact_with_neighbor_bin(parts, pt_idx, row - 1, col - 1);  // Top left
+        interact_with_neighbor_bin(parts, pt_idx, row - 1, col + 1);  // Top right
+        interact_with_neighbor_bin(parts, pt_idx, row + 1, col - 1);  // Bottom left
+        interact_with_neighbor_bin(parts, pt_idx, row + 1, col + 1);  // Bottom right
     }
 }
 
@@ -306,7 +305,7 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
     // Calculate forces in each bin
     for (int r = 1; r <= NumBinRowsPerProc; ++r) {
         for (int c = 0; c < NumBinCols; ++c) {
-            calculate_bin_forces(parts, rank, num_proc, r, c);
+            calculate_bin_forces(parts, r, c);
         }
     }
 
