@@ -17,17 +17,15 @@ using namespace std;
 // Indexing Bins matrix
 #define BIN_IDX(row, col) row * NumBinCols + col
 
-// Global variables shared across processors
-double ProcHeight;  // Height of a processor block
-int NumBinRowsPerProc;  // Number of rows of bins per processor
+// Processor-related variables
+double ProcXOffset;  // Processor offset on X-axis (same across processors)
+int NumBinRowsPerProc;  // Number of rows of bins per processor (varies across processors)
 int NumBinCols;  // Number of columns of bins (same across processors)
+double MyMinX;  // Minimum X value of this processor
 
 // Convenience variables for reuse
 int MaxNumPtsPerRow;  // Maximum number of particles per row of bins
 int MaxNumPtsPerProc;  // Maximum number of particles per processor
-
-// Processor-specific variables
-double MyMinX;  // Minimum X value of this processor
 
 // The bins containing the indices of all the relevant particles (plus padding)
 unordered_set<int> *Bins;
@@ -48,20 +46,29 @@ vector<particle_t> *IncomingPtsBuffer;
 
 // Calculate the rank that the input particle belongs to
 inline int get_particle_rank(const particle_t &pt) {
-    return floor(pt.x / ProcHeight);
+    return floor(pt.x / ProcXOffset);
 }
 
 // Get the particle's index in the Bins array
 inline int which_bin(const particle_t &pt) {
     int row_idx = (int) floor((pt.x - MyMinX) / BIN_SIZE) + 1;
+    assert(row_idx >= 0);
+    assert(row_idx < NumBinRowsPerProc + 2);
     int col_idx = floor(pt.y / BIN_SIZE);
-    return BIN_IDX(row_idx, col_idx);
+    assert(col_idx >= 0);
+    assert(col_idx < NumBinCols);
+    int bin_idx = BIN_IDX(row_idx, col_idx);
+    assert(bin_idx < (NumBinRowsPerProc + 2) * NumBinCols);  // DEBUG
+    return bin_idx;
 }
 
 // Insert the input particle to the correct bin
 inline void put_one_pt_to_bin(const particle_t &pt) {
-    int idx = which_bin(pt);
-    Bins[idx].insert(pt.id - 1);  // Particle ID is 1-based
+//    assert(pt.x >= MyMinX - BIN_SIZE);  // DEBUG
+//    assert(pt.x < MyMinX + ProcHeight + BIN_SIZE);  // DEBUG
+    auto& bin = Bins[which_bin(pt)];
+    bin.reserve(1);  // HACK to get rid of SIGFPE
+    bin.insert(pt.id - 1);  // Particle ID is 1-based
 }
 
 // Get the rank of a neighbor processor (if valid)
@@ -94,9 +101,15 @@ void copy_pts_in_halo_bins(Direction which_row,
                            particle_t *parts,
                            vector<particle_t> &pts_buffer) {
     int row_idx = which_row == TOP ? 1 : NumBinRowsPerProc;
-    for (int c = 0; c <= NumBinCols; ++c) {
+    for (int c = 0; c < NumBinCols; ++c) {
         const auto &bin = Bins[BIN_IDX(row_idx, c)];
         copy_add_pts_from_bin_to_vec(bin, parts, pts_buffer);
+        // DEBUG
+//        for (auto& pt_idx : bin) {
+//            auto& shit = parts[pt_idx];
+//            int shit_row = (int) floor((shit.x - MyMinX) / BIN_SIZE) + 1;
+//            assert(shit_row == row_idx);
+//        }
     }
 }
 
@@ -110,12 +123,11 @@ void copy_pts_from_all_my_bins(particle_t* parts, vector<particle_t> &dest_vec) 
 }
 
 // Put received particles into where they belong in the particle array and the bins
-void distribute_received_particles(vector<particle_t> recv_buffer, int recv_cnt, particle_t* parts) {
-    for (int i = 0; i < recv_cnt; i++) {
-        particle_t &pt = recv_buffer[i];
-        auto pt_idx = pt.id - 1;  // ID is 1-indexed
-        parts[pt_idx] = pt;
-        put_one_pt_to_bin(pt);
+void distribute_received_particles(const vector<particle_t>& recv_buffer, int recv_cnt, particle_t* parts) {
+    for (int i = 0; i < recv_cnt; ++i) {
+        particle_t pt_cpy = recv_buffer[i];
+        parts[pt_cpy.id - 1] = pt_cpy;  // ID is 1-indexed
+        put_one_pt_to_bin(pt_cpy);
     }
 }
 
@@ -123,11 +135,18 @@ void distribute_received_particles(vector<particle_t> recv_buffer, int recv_cnt,
 void communicate_with_neighbor_proc(Direction nei_dir, particle_t *parts, int rank, int num_proc) {
     int nei_rank = get_neighbor_proc_rank(nei_dir, rank, num_proc);
     if (nei_rank != -1) {  // If neighbor exists
+        // DEBUG
+        assert(nei_rank == rank - 1 || nei_rank == rank + 1);
+
         // Collect to-be-sent particles from boundary bins
         vector<particle_t> pts_to_send;
         copy_pts_in_halo_bins(nei_dir, parts, pts_to_send);
         // Get the receiving recv_buffer
         auto &recv_buffer = nei_dir == TOP ? TopBuffer : BottomBuffer;
+        // Clear halo bins
+        int halo_row = nei_dir == TOP ? 0 : NumBinRowsPerProc + 1;
+        for (int c = 0; c < NumBinCols; c++)
+            Bins[BIN_IDX(halo_row, c)].clear();
         // Send and receive
         MPI_Status status;
         MPI_Sendrecv(&pts_to_send[0], pts_to_send.size(), PARTICLE,
@@ -137,6 +156,17 @@ void communicate_with_neighbor_proc(Direction nei_dir, particle_t *parts, int ra
                      MPI_COMM_WORLD, &status);
         int recv_cnt;
         MPI_Get_count(&status, PARTICLE, &recv_cnt);
+
+        // DEBUG
+        for (int i = 0; i < recv_cnt; ++i) {
+            auto& shit = recv_buffer[i];
+            assert(get_particle_rank(shit) == nei_rank);
+            int row_idx = (int) floor((shit.x - MyMinX) / BIN_SIZE) + 1;
+            if (row_idx != halo_row)
+                fprintf(stderr, "[FUCK] row_idx = %d | halo_row = %d\n", row_idx, halo_row);
+            assert(row_idx == halo_row);
+        }
+
         // Update particle array and bins with received particles
         distribute_received_particles(recv_buffer, recv_cnt, parts);
     }
@@ -237,6 +267,11 @@ void move_particle_cross_processor(Direction nei_dir, int rank, int num_proc, pa
         MPI_Get_count(&status, PARTICLE, &recv_cnt);
         // Clear all sent particles
         to_send.clear();
+        // DEBUG: make sure received ones are mine indeed
+        for (int i = 0; i < recv_cnt; ++i) {
+            auto& pt = to_recv[i];
+            assert(get_particle_rank(pt) == rank);
+        }
         // Put all received particles to the right bins
         distribute_received_particles(to_recv, recv_cnt, parts);
     }
@@ -246,14 +281,22 @@ void move_particle_cross_processor(Direction nei_dir, int rank, int num_proc, pa
 
 // Initialize data objects that we need
 void init_simulation(particle_t *parts, int num_parts, double size, int rank, int num_proc) {
-    // Calculate global variables
-    ProcHeight = size / num_proc;  // Distribute input grid to processors
-    NumBinRowsPerProc = ceil(ProcHeight / BIN_SIZE);
+    // Compartmentalize by bins first
     NumBinCols = ceil(size / BIN_SIZE);
-    // FIXME: do we need to account for padding (like below)?
+    // Distribute bin rows to processors
+    NumBinRowsPerProc = NumBinCols / num_proc;
+    ProcXOffset = NumBinRowsPerProc * BIN_SIZE;
     MaxNumPtsPerRow = MAX_NUM_PTS_PER_BIN * NumBinCols;
     MaxNumPtsPerProc = MaxNumPtsPerRow * NumBinRowsPerProc;
-    MyMinX = rank * ProcHeight;
+    MyMinX = rank * ProcXOffset;
+    // NOTE: Corner case for the last processor
+    if (rank == num_proc - 1) {
+        NumBinRowsPerProc = NumBinCols - (num_proc - 1) * NumBinRowsPerProc;
+    }
+
+    // DEBUG
+//    fprintf(stderr, "[Rank %d/%d] #cols = %d, #rows = %d, height = %f, min_x = %f, size = %f\n",
+//            rank, num_proc - 1, NumBinCols, NumBinRowsPerProc, ProcHeight, MyMinX, size);
 
     // Initialize bins specific to this processor (+2 because of padding)
     int num_bins_with_padding = (NumBinRowsPerProc + 2) * NumBinCols;
@@ -314,6 +357,8 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
                     itr = Bins[bin_idx].erase(itr);
                     // If particle is bound to another processor
                     if (new_rank != rank) {
+                        // DEBUG
+                        assert(new_rank == rank - 1 || new_rank == rank + 1);
                         // Push copy of particle to outgoing buffer
                         Direction which_nei = new_rank < rank ? TOP : BOTTOM;
                         OutgoingPtsBuffer[which_nei].push_back(pt_struct);
