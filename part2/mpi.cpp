@@ -47,7 +47,6 @@ vector<particle_t> *IncomingPtsBuffer;
 // Calculate the rank that the input particle belongs to
 inline int get_particle_rank(const particle_t &pt, int num_proc) {
     int rank = floor(pt.x / ProcXOffset);
-//    assert(rank <= num_proc);  // DEBUG
     // The last processor might be higher than others
     return rank < num_proc ? rank : num_proc - 1;
 }
@@ -62,10 +61,6 @@ inline int which_bin(const particle_t &pt) {
 
 // Insert the input particle to the correct bin
 inline void put_one_pt_to_bin(const particle_t &pt) {
-    // DEBUG
-//    int fucker_row = (int) floor((pt.x - MyMinX) / BIN_SIZE) + 1;
-//    assert(fucker_row < NumBinRowsPerProc + 2);
-
     auto &bin = Bins[which_bin(pt)];
     bin.reserve(1);  // HACK to get rid of SIGFPE
     bin.insert(pt.id - 1);  // Particle ID is 1-based
@@ -77,7 +72,6 @@ inline int get_neighbor_proc_rank(Direction nei_dir, int my_rank, int num_proc) 
     if (nei_dir == TOP) {
         nei_rank -= 1;
     } else {
-//        assert(nei_dir == BOTTOM);  // TODO: remove once debugging done
         nei_rank += 1;
     }
 
@@ -104,12 +98,6 @@ void copy_pts_in_halo_bins(Direction which_row,
     for (int c = 0; c < NumBinCols; ++c) {
         const auto &bin = Bins[BIN_IDX(row_idx, c)];
         copy_add_pts_from_bin_to_vec(bin, parts, pts_buffer);
-        // DEBUG
-//        for (auto& pt_idx : bin) {
-//            auto& shit = parts[pt_idx];
-//            int shit_row = (int) floor((shit.x - MyMinX) / BIN_SIZE) + 1;
-//            assert(shit_row == row_idx);
-//        }
     }
 }
 
@@ -135,9 +123,6 @@ void distribute_received_particles(const vector<particle_t> &recv_buffer, int re
 void communicate_with_neighbor_proc(Direction nei_dir, particle_t *parts, int rank, int num_proc) {
     int nei_rank = get_neighbor_proc_rank(nei_dir, rank, num_proc);
     if (nei_rank != -1) {  // If neighbor exists
-        // DEBUG
-//        assert(nei_rank == rank - 1 || nei_rank == rank + 1);
-
         // Collect to-be-sent particles from boundary bins
         vector<particle_t> pts_to_send;
         copy_pts_in_halo_bins(nei_dir, parts, pts_to_send);
@@ -156,17 +141,6 @@ void communicate_with_neighbor_proc(Direction nei_dir, particle_t *parts, int ra
                      MPI_COMM_WORLD, &status);
         int recv_cnt;
         MPI_Get_count(&status, PARTICLE, &recv_cnt);
-
-        // DEBUG
-//        for (int i = 0; i < recv_cnt; ++i) {
-//            auto &shit = recv_buffer[i];
-//            assert(get_particle_rank(shit, num_proc) == nei_rank);
-//            int row_idx = (int) floor((shit.x - MyMinX) / BIN_SIZE) + 1;
-//            if (row_idx != halo_row)
-//                fprintf(stderr, "[FUCK] row_idx = %d | halo_row = %d\n", row_idx, halo_row);
-//            assert(row_idx == halo_row);
-//        }
-
         // Update particle array and bins with received particles
         distribute_received_particles(recv_buffer, recv_cnt, parts);
     }
@@ -198,12 +172,6 @@ inline void interact_with_neighbor_bin(particle_t *parts, int pt_idx, int rank, 
     // Do nothing if neighbor bin does not exist (+2 because of padding)
     if (nei_row < 0 || nei_row >= NumBinRowsPerProc + 2 ||
         nei_col < 0 || nei_col >= NumBinCols)
-        return;
-    // Top processor has no top padding (not necessary?)
-    if (rank == 0 && nei_row == 0)
-        return;
-    // Bottom processor has no bottom padding (not necessary?)
-    if (rank == num_proc - 1 && nei_row == NumBinRowsPerProc + 1)
         return;
 
     // Interact with all particles in a valid neighbor bin
@@ -284,11 +252,6 @@ void move_particle_cross_processor(int rank, int num_proc, particle_t *parts) {
         MPI_Get_count(&status, PARTICLE, &recv_cnt);
         // Clear all sent particles
         to_send.clear();
-        // DEBUG: make sure received ones are mine indeed
-//        for (int i = 0; i < recv_cnt; ++i) {
-//            auto &pt = to_recv[i];
-//            assert(get_particle_rank(pt, num_proc) == rank);
-//        }
         // Put all received particles to the right bins
         distribute_received_particles(to_recv, recv_cnt, parts);
     }
@@ -310,10 +273,6 @@ void init_simulation(particle_t *parts, int num_parts, double size, int rank, in
     if (rank == num_proc - 1) {
         NumBinRowsPerProc = NumBinCols - (num_proc - 1) * NumBinRowsPerProc;
     }
-
-    // DEBUG
-//    fprintf(stderr, "[Rank %d/%d] #cols = %d, #rows = %d, height = %f, min_x = %f, size = %f\n",
-//            rank, num_proc - 1, NumBinCols, NumBinRowsPerProc, ProcHeight, MyMinX, size);
 
     // Initialize bins specific to this processor (+2 because of padding)
     int num_bins_with_padding = (NumBinRowsPerProc + 2) * NumBinCols;
@@ -340,24 +299,9 @@ void init_simulation(particle_t *parts, int num_parts, double size, int rank, in
 }
 
 void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, int num_proc) {
-    // DEBUG
-//    if (rank == num_proc - 1) {
-//        fprintf(stderr, "simulate_one_step()\n");
-//    }
     // Exchange particles with top and bottom neighbor processors
     communicate_with_neighbor_proc(TOP, parts, rank, num_proc);
-
-    // DEBUG
-//    if (rank == num_proc - 1) {
-//        fprintf(stderr, "comm with top done\n");
-//    }
-
     communicate_with_neighbor_proc(BOTTOM, parts, rank, num_proc);
-
-    // DEBUG
-//    if (rank == num_proc - 1) {
-//        fprintf(stderr, "comm with bottom done\n");
-//    }
 
     // Calculate forces in each bin
     for (int r = 1; r <= NumBinRowsPerProc; ++r) {
@@ -366,113 +310,46 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
         }
     }
 
-    // DEBUG
-//    if (rank == num_proc - 1) {
-//        fprintf(stderr, "calc force done\n");
-//    }
-
     MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
-
-    // DEBUG
-//    if (rank == num_proc - 1) {
-//        fprintf(stderr, "pass barrier, applying force\n");
-//    }
 
     // Apply forces to all particles in inner bins
     for (int r = 1; r <= NumBinRowsPerProc; ++r) {
         for (int c = 0; c < NumBinCols; ++c) {
-//            // DEBUG
-//            if (rank == num_proc - 1) {
-//                fprintf(stderr, "<apply_foce> row = %d/%d | col = %d/%d\n", r, NumBinRowsPerProc, c, NumBinCols - 1);
-//            }
             int bin_idx = BIN_IDX(r, c);
             unordered_set<int> &bin = Bins[bin_idx];
             auto itr = bin.begin();
             while (itr != bin.end()) {
                 int pt_idx = *itr;
-//                assert(pt_idx < num_parts);  // DEBUG
                 particle_t &pt_struct = parts[pt_idx];
-//                assert(get_particle_rank(pt_struct, num_proc) == rank);  // DEBUG
-//                // DEBUG
-//                if (rank == num_proc - 1) {
-//                    fprintf(stderr, "moving particle %llu\n", pt_struct.id);
-//                }
                 // Move the particle
                 move_one_particle(pt_struct, size);
-                // DEBUG
-//                if (rank == num_proc - 1) {
-//                    fprintf(stderr, "moved particle %llu\n", pt_struct.id);
-//                }
                 int new_rank = get_particle_rank(pt_struct, num_proc);
                 int new_bin_idx = which_bin(pt_struct);
                 // If the particle should stay in the same bin
                 if (new_rank == rank && new_bin_idx == bin_idx) {
-//                    if (rank == num_proc - 1) {  // DEBUG
-//                        fprintf(stderr, "ignoring particle %llu\n", pt_struct.id);
-//                    }
                     ++itr;  // Continue
                 } else {  // If the particle should change bins
-//                    if (rank == num_proc - 1) {  // DEBUG
-//                        fprintf(stderr, "erasing particle %llu from bin %d\n", pt_struct.id, bin_idx);
-//                    }
                     // Remove from current bin
                     itr = Bins[bin_idx].erase(itr);
                     // If particle is bound to another processor
                     if (new_rank != rank) {
-//                        if (rank == num_proc - 1) {  // DEBUG
-//                            fprintf(stderr, "buffering particle %llu for proc %d\n", pt_struct.id, new_rank);
-//                        }
                         // Push copy of particle to outgoing buffer
                         OutgoingPtsBuffer[new_rank].push_back(pt_struct);
                     } else {  // If particle should stay in same processor
-                        // DEBUG
-//                        int fucker_row = (int) floor((pt_struct.x - MyMinX) / BIN_SIZE) + 1;
-//                        if (fucker_row >= NumBinRowsPerProc + 2) {
-//                            fprintf(stderr, "[FUCKER %d/%d] local_pt_row = %d, num_rows = %d\n",
-//                                    rank, num_proc - 1, fucker_row, NumBinRowsPerProc);
-//                        }
-//                        assert(fucker_row < NumBinRowsPerProc + 2);
-//                        assert(rank == get_particle_rank(pt_struct, num_proc));
-//                        if (rank == num_proc - 1) {  // DEBUG
-//                            fprintf(stderr, "relocating particle %llu for to bin %d\n", pt_struct.id, which_bin(pt_struct));
-//                        }
                         // Insert into another local bin
                         put_one_pt_to_bin(pt_struct);
                     }
                 }
-//                if (rank == num_proc - 1) {
-//                    fprintf(stderr, "distributed particle %llu\n", pt_struct.id);
-//                }
             }
         }
     }
 
-    // DEBUG
-//    if (rank == num_proc - 1) {
-//        fprintf(stderr, "apply force done\n");
-//    }
-
     MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
-
-    // DEBUG
-//    if (rank == num_proc - 1) {
-//        fprintf(stderr, "pass barrier, moving particles across proc\n");
-//    }
 
     // Exchange moved particles with all necessary processors
     move_particle_cross_processor(rank, num_proc, parts);
 
-    // DEBUG
-//    if (rank == num_proc - 1) {
-//        fprintf(stderr, "moved particles\n");
-//    }
-
     MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
-
-    // DEBUG
-//    if (rank == num_proc - 1) {
-//        fprintf(stderr, "sim step done\n");
-//    }
 }
 
 /* Write this function such that at the end of it, the master (rank == 0)
@@ -480,9 +357,6 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
  * parts is complete and sorted by particle id. */
 // NOTE: Performance isn't critical here as this function is only called when outputting (-o)
 void gather_for_save(particle_t *parts, int num_parts, double size, int rank, int num_proc) {
-    // DEBUG
-//    fprintf(stderr, ">>>>>> gather_for_save()\n");
-
     int num_parts_received = 0;  // Received number of particles (debug)
 
     // Collect all the particles in my inner bins
