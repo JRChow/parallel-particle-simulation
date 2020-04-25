@@ -12,7 +12,7 @@ using namespace std;
 // Length of a bin's side
 #define BIN_SIZE 0.01
 // Maximum number of particles per bin
-#define MAX_NUM_PTS_PER_BIN 20
+#define MAX_NUM_PTS_PER_BIN 5
 // Indexing Bins matrix
 #define BIN_IDX(row, col) row * NumBinCols + col
 
@@ -227,24 +227,21 @@ void copy_pts_to_arr_by_id(const vector<particle_t> &src_pts_vec, int N_src,
 }
 
 // Exchange moved particles with all processors
-void move_particle_cross_processor(int rank, int num_proc, particle_t *parts) {
-    for (int p = 0; p < num_proc; ++p) {
+void move_particle_cross_processor(Direction nei_dir, particle_t *parts, int rank, int num_proc){
+    int nei_rank = get_neighbor_proc_rank(nei_dir, rank, num_proc);
+    if (nei_rank != -1) {  // If neighbor exists
+        // Get the index
+        int index = nei_dir == TOP ? 0 : 1;
         // Prepare all cross-processor particles to send
-        vector<particle_t> &to_send = OutgoingPtsBuffer[p];
+        vector<particle_t> &to_send = OutgoingPtsBuffer[index];
         // Prepare buffer to receive cross-processor particles
-        vector<particle_t> &to_recv = IncomingPtsBuffer[p];
-        /* Do not communicate with self (note: even if nothing to send,
-         * still need to communicate to avoid deadlock because may have
-         * something to receive). */
-        if (p == rank) {
-            continue;
-        }
+        vector<particle_t> &to_recv = IncomingPtsBuffer[index];
         // Two-way communication to avoid deadlock
         MPI_Status status;
         MPI_Sendrecv(&to_send[0], to_send.size(), PARTICLE,
-                     p, 1234,
+                     nei_rank, 1234,
                      &to_recv[0], MaxNumPtsPerProc, PARTICLE,
-                     p, 1234,
+                     nei_rank, 1234,
                      MPI_COMM_WORLD, &status);
         int recv_cnt;
         MPI_Get_count(&status, PARTICLE, &recv_cnt);
@@ -252,7 +249,7 @@ void move_particle_cross_processor(int rank, int num_proc, particle_t *parts) {
         to_send.clear();
         // Put all received particles to the right bins
         distribute_received_particles(to_recv, recv_cnt, parts);
-    }
+    }    
 }
 
 ///////////////////////////////////////// Key Functions /////////////////////////////////////////
@@ -288,9 +285,9 @@ void init_simulation(particle_t *parts, int num_parts, double size, int rank, in
     BottomBuffer.reserve(MaxNumPtsPerRow);
 
     // Allocate memory to buffers for cross-processor particles
-    OutgoingPtsBuffer = new vector<particle_t>[num_proc];
-    IncomingPtsBuffer = new vector<particle_t>[num_proc];
-    for (int i = 0; i < num_proc; ++i) {
+    OutgoingPtsBuffer = new vector<particle_t>[2];
+    IncomingPtsBuffer = new vector<particle_t>[2];
+    for (int i = 0; i < 2; ++i) {
         OutgoingPtsBuffer[i].reserve(MaxNumPtsPerProc);
         IncomingPtsBuffer[i].reserve(MaxNumPtsPerProc);
     }
@@ -334,7 +331,12 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
                     // If particle is bound to another processor
                     if (new_rank != rank) {
                         // Push copy of particle to outgoing buffer
-                        OutgoingPtsBuffer[new_rank].push_back(pt_struct);
+                        if (new_rank == rank-1){
+                            OutgoingPtsBuffer[0].push_back(pt_struct);
+                        } else if(new_rank == rank + 1){
+                            OutgoingPtsBuffer[1].push_back(pt_struct);
+                        }
+                        // OutgoingPtsBuffer[new_rank].push_back(pt_struct);
                     } else {  // If particle should stay in same processor
                         /* Buffer the particles and move them later.
                          * NOTE: Do NOT move them now because we might move particles
@@ -356,7 +358,8 @@ void simulate_one_step(particle_t *parts, int num_parts, double size, int rank, 
     MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
 
     // Exchange moved particles with all necessary processors
-    move_particle_cross_processor(rank, num_proc, parts);
+    move_particle_cross_processor(TOP, parts, rank, num_proc);
+    move_particle_cross_processor(BOTTOM, parts, rank, num_proc);
 
     MPI_Barrier(MPI_COMM_WORLD);  // TODO: try to remove?
 }
